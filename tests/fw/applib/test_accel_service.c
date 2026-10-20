@@ -47,6 +47,9 @@ struct AccelManagerState {
   uint32_t samples_per_update;
   uint32_t generation;
   bool event_posted;
+  bool raw_counts;
+  //! Whether raw counts were chosen before the first buffer, as the real manager needs
+  bool raw_counts_before_buffer;
 };
 
 #define FAKE_SUBSCRIPTION_SLOTS 4
@@ -175,6 +178,22 @@ int sys_accel_manager_peek(AccelData *accel_data) {
   return 0;
 }
 
+void sys_accel_manager_set_raw_counts(AccelManagerState *state, bool raw_counts) {
+  prv_assert_live(state);
+  state->raw_counts = raw_counts;
+  state->raw_counts_before_buffer = (state->generation == 0);
+}
+
+// 0/0 until the accelerometer has delivered samples
+static int32_t s_scale_num;
+static int32_t s_scale_den;
+
+bool sys_accel_manager_get_scale(int32_t *scale_num, int32_t *scale_den) {
+  *scale_num = s_scale_num;
+  *scale_den = s_scale_den;
+  return s_scale_den != 0;
+}
+
 // Posts a data event for the current subscription and returns its context
 static void *prv_post(void) {
   s_current->event_posted = true;
@@ -287,6 +306,8 @@ void test_accel_service__initialize(void) {
   s_timestamps[1] = 0;
   s_session = nullptr;
   s_read_after_change = 0;
+  s_scale_num = 0;
+  s_scale_den = 0;
   stub_pebble_tasks_set_current(PebbleTask_App);
 }
 
@@ -804,4 +825,37 @@ void test_accel_service__a_session_that_never_subscribed_can_be_deleted_anywhere
   accel_session_delete(session);
 
   cl_assert_equal_i(fake_pbl_malloc_num_net_allocs(), 0);
+}
+
+// Raw counts
+//////////////////////////////////////////
+
+//! A raw counts subscription asks the manager for counts before handing it a buffer
+void test_accel_service__a_raw_counts_subscription_gets_counts(void) {
+  accel_raw_counts_service_subscribe(1, prv_raw_data_handler);
+
+  cl_assert(s_current->raw_counts);
+  cl_assert(s_current->raw_counts_before_buffer);
+  prv_deliver(1);
+  cl_assert_equal_i(s_raw_data_handler_calls, 1);
+}
+
+//! A raw data subscription stays in milli-g
+void test_accel_service__a_raw_data_subscription_gets_milli_g(void) {
+  accel_raw_data_service_subscribe(1, prv_raw_data_handler);
+
+  cl_assert(!s_current->raw_counts);
+}
+
+//! Counts per g come from the manager's scale, and are 0 until it knows it
+void test_accel_service__counts_per_g_follow_the_scale(void) {
+  cl_assert_equal_i(accel_service_get_counts_per_g(), 0);
+
+  s_scale_num = 16000;
+  s_scale_den = 32768;
+  cl_assert_equal_i(accel_service_get_counts_per_g(), 2048);
+
+  s_scale_num = 1;
+  s_scale_den = 1;
+  cl_assert_equal_i(accel_service_get_counts_per_g(), 1000);
 }

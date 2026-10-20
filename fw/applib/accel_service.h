@@ -97,6 +97,19 @@ void accel_data_service_subscribe(uint32_t samples_per_update, AccelDataHandler 
 //! @param samples_per_update the number of samples to buffer, between 0 and 25.
 void accel_raw_data_service_subscribe(uint32_t samples_per_update, AccelRawDataHandler handler);
 
+//! Subscribe to the accelerometer raw data event service, with the samples in the
+//! accelerometer's own counts instead of milli-g. Counts keep the full resolution of the
+//! sensor; divide by \ref accel_service_get_counts_per_g() to get g.
+//! @note Cannot use \ref accel_service_peek() when subscribed to accelerometer data events.
+//! @param handler A callback to be executed on accelerometer data events
+//! @param samples_per_update the number of samples to buffer, between 0 and 25.
+void accel_raw_counts_service_subscribe(uint32_t samples_per_update, AccelRawDataHandler handler);
+
+//! Get the scale of the samples from \ref accel_raw_counts_service_subscribe().
+//! @return The number of counts in 1 g, or 0 until the accelerometer has delivered its first
+//! samples. Call it from the data handler.
+int32_t accel_service_get_counts_per_g(void);
+
 //! Unsubscribe from the accelerometer data event service. Once unsubscribed,
 //! the previously registered handler will no longer be called.
 void accel_data_service_unsubscribe(void);

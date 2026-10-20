@@ -54,9 +54,11 @@ typedef struct AccelManagerState {
   uint8_t num_samples;      // number of samples in raw_buffer
   bool event_posted;        // True while a data event is queued or running
   uint32_t generation;      // bumped on every buffer change
+  bool raw_counts;          // raw_buffer gets raw counts instead of milli-g
 } AccelManagerState;
 
 typedef struct {
+  //! In raw counts, which s_scale_num / s_scale_den convert to milli-g
   AccelRawData rawdata;
   // The exact time the sample was collected can be recovered by:
   //   time_sample_collected = s_last_empty_timestamp_ms + timestamp_delta_ms
@@ -84,6 +86,12 @@ static uint8_t s_buffer_storage[MAX(200, 2 * CONFIG_SERVICE_ACCEL_MANAGER_BATCH_
                                 sizeof(AccelManagerBufferData)];
 
 static uint64_t s_last_empty_timestamp_ms = 0;
+
+//! Scale of the samples in s_buffer: mg = counts * s_scale_num / s_scale_den. The service keeps
+//! counts so that raw count subscribers get the sensor's full resolution. 0 until the first
+//! sample arrives.
+static int32_t s_scale_num = 0;
+static int32_t s_scale_den = 0;
 
 //! Whether the accel manager is enabled. When disabled (e.g. during factory reset via
 //! RunLevel_BareMinimum), the accelerometer hardware is powered down and callbacks are ignored.
@@ -273,6 +281,10 @@ static bool prv_call_data_callback(AccelManagerState *state) {
   }
 }
 
+static int16_t prv_counts_to_mg(int16_t counts, int32_t scale_num, int32_t scale_den) {
+  return (int16_t)((int32_t)counts * scale_num / scale_den);
+}
+
 //! This is called every time new samples arrive from the accel driver & every
 //! time data has been drained by the accel service. Its responsibility is
 //! populating subscriber storage with new samples (at the requested sample
@@ -313,7 +325,16 @@ static void prv_dispatch_data(bool post_event) {
         state->timestamp_ms = s_last_empty_timestamp_ms + data.timestamp_delta_ms;
       }
 
-      memcpy(state->raw_buffer + state->num_samples, &data, sizeof(AccelRawData));
+      AccelRawData *dst = state->raw_buffer + state->num_samples;
+      if (state->raw_counts) {
+        *dst = data.rawdata;
+      } else {
+        *dst = (AccelRawData){
+          .x = prv_counts_to_mg(data.rawdata.x, s_scale_num, s_scale_den),
+          .y = prv_counts_to_mg(data.rawdata.y, s_scale_num, s_scale_den),
+          .z = prv_counts_to_mg(data.rawdata.z, s_scale_num, s_scale_den),
+        };
+      }
       state->num_samples++;
     }
 
@@ -629,6 +650,25 @@ PBL_SYSCALL(int, sys_accel_manager_set_sample_buffer, (VAL, AccelManagerState *,
   return 0;
 }
 
+PBL_SYSCALL(void, sys_accel_manager_set_raw_counts, (VAL, AccelManagerState *, state),
+            (VAL, bool, raw_counts)) {
+  prv_assert_state_from_user(state, from_user);
+
+  pbl_accel_lock(ACCEL);
+  state->raw_counts = raw_counts;
+  pbl_accel_unlock(ACCEL);
+}
+
+PBL_SYSCALL(bool, sys_accel_manager_get_scale, (OUT, int32_t *, scale_num),
+            (OUT, int32_t *, scale_den)) {
+  pbl_accel_lock(ACCEL);
+  *scale_num = s_scale_num;
+  *scale_den = s_scale_den;
+  pbl_accel_unlock(ACCEL);
+
+  return *scale_den != 0;
+}
+
 PBL_SYSCALL(uint32_t, sys_accel_manager_get_max_samples_per_update) {
   return pbl_accel_get_max_num_samples(ACCEL);
 }
@@ -745,11 +785,17 @@ static bool prv_shared_buffer_empty(void) {
   return empty;
 }
 
-static int16_t prv_scale_raw_axis(const uint8_t *sample, const AccelRawBatch *batch, uint8_t axis) {
+// Sign-corrected; clipped since negating -32768 doesn't fit
+static int16_t prv_raw_axis_counts(const uint8_t *sample, const AccelRawBatch *batch,
+                                   uint8_t axis) {
   const uint8_t *p = sample + batch->axis[axis].offset;
   int16_t raw = (int16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8U));
-  int32_t mg = (int32_t)raw * batch->scale_num / batch->scale_den;
-  return (int16_t)(batch->axis[axis].sign * mg);
+  return (int16_t)CLIP(batch->axis[axis].sign * (int32_t)raw, INT16_MIN, INT16_MAX);
+}
+
+static int16_t prv_raw_axis_mg(const uint8_t *sample, const AccelRawBatch *batch, uint8_t axis) {
+  return prv_counts_to_mg(prv_raw_axis_counts(sample, batch, axis), batch->scale_num,
+                          batch->scale_den);
 }
 
 static void prv_samples_cb(const struct pbl_accel *accel, const AccelRawBatch *batch,
@@ -761,15 +807,18 @@ static void prv_samples_cb(const struct pbl_accel *accel, const AccelRawBatch *b
   // The most recent sample is the last one in the batch.
   const uint8_t *last = batch->data + (batch->num_samples - 1) * batch->stride;
   AccelDriverSample last_sample = {
-    .x = prv_scale_raw_axis(last, batch, AXIS_X),
-    .y = prv_scale_raw_axis(last, batch, AXIS_Y),
-    .z = prv_scale_raw_axis(last, batch, AXIS_Z),
+    .x = prv_raw_axis_mg(last, batch, AXIS_X),
+    .y = prv_raw_axis_mg(last, batch, AXIS_Y),
+    .z = prv_raw_axis_mg(last, batch, AXIS_Z),
     .timestamp_us = batch->first_timestamp_us +
                     (uint64_t)(batch->num_samples - 1) * batch->sampling_interval_us,
   };
   prv_update_last_accel_data(&last_sample);
 
   PBL_ANALYTICS_ADD(accel_sample_count, batch->num_samples);
+
+  s_scale_num = batch->scale_num;
+  s_scale_den = batch->scale_den;
 
   if (!s_buffer.clients) {
     return; // no clients so don't buffer any data
@@ -803,9 +852,9 @@ static void prv_samples_cb(const struct pbl_accel *accel, const AccelRawBatch *b
     }
     const uint8_t *s = batch->data + i * batch->stride;
     uint64_t ts_ms = (batch->first_timestamp_us + (uint64_t)i * batch->sampling_interval_us) / 1000;
-    dst->rawdata.x = prv_scale_raw_axis(s, batch, AXIS_X);
-    dst->rawdata.y = prv_scale_raw_axis(s, batch, AXIS_Y);
-    dst->rawdata.z = prv_scale_raw_axis(s, batch, AXIS_Z);
+    dst->rawdata.x = prv_raw_axis_counts(s, batch, AXIS_X);
+    dst->rawdata.y = prv_raw_axis_counts(s, batch, AXIS_Y);
+    dst->rawdata.z = prv_raw_axis_counts(s, batch, AXIS_Z);
     // Note: the delta value overflows if the s_buffer is not drained for ~65s,
     // but there should be more than enough time for it to drain in that window
     dst->timestamp_delta_ms = (uint16_t)(ts_ms - s_last_empty_timestamp_ms);
@@ -930,6 +979,8 @@ void test_accel_manager_reset(void) {
   s_double_tap_subscribers_count = 0;
   s_motion_backlight_subscribed = false;
   s_enabled = true;
+  s_scale_num = 0;
+  s_scale_den = 0;
 }
 
 #endif

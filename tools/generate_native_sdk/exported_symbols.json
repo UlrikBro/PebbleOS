@@ -2,7 +2,7 @@
   "_notes": [ "You need to increase the revision for each change of this file AND",
               "increase PROCESS_INFO_CURRENT_SDK_VERSION_MINOR in pebble_process_info.h"
             ],
-  "revision" : "109",
+  "revision" : "110",
   "version" : "2.0",
   "files": [
     "include/pbl/drivers/button_id.h",
@@ -516,6 +516,14 @@
                   "type": "function",
                   "name": "accel_raw_data_service_subscribe",
                   "addedRevision": "15"
+                }, {
+                  "type": "function",
+                  "name": "accel_raw_counts_service_subscribe",
+                  "addedRevision": "110"
+                }, {
+                  "type": "function",
+                  "name": "accel_service_get_counts_per_g",
+                  "addedRevision": "110"
                 }
               ]
             }, {

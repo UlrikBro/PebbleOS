@@ -476,3 +476,87 @@ void test_accel_manager__a_consume_on_new_timers_hands_over_a_waiting_batch(void
   cl_assert(result);
   cl_assert_equal_i(s_posted_events, 1);
 }
+
+// Raw counts
+//////////////////////////////////////////
+
+// Feeds one sample as a driver batch at 16 g full scale, with z mounted upside down
+static void prv_feed_batch(int16_t x, int16_t y, int16_t z) {
+  const int16_t raw[3] = {x, y, z};
+  AccelRawBatch batch = {
+    .data = (const uint8_t *)raw,
+    .num_samples = 1,
+    .stride = sizeof(raw),
+    .axis = {{.offset = 0, .sign = 1}, {.offset = 2, .sign = 1}, {.offset = 4, .sign = -1}},
+    .scale_num = 16000,
+    .scale_den = 32768,
+    .first_timestamp_us = s_now_us,
+    .sampling_interval_us = 1000000 / ACCEL_SAMPLING_25HZ,
+  };
+  s_now_us += batch.sampling_interval_us;
+  pbl_accel_lock(ACCEL);
+  pbl_accel_report_samples(ACCEL, &batch);
+  pbl_accel_unlock(ACCEL);
+}
+
+//! The same batch reaches a raw counts subscriber as counts and the others as milli-g
+void test_accel_manager__a_raw_counts_subscriber_gets_counts_and_others_milli_g(void) {
+  AccelRawData mg[1];
+  AccelManagerState *mg_state = prv_subscribe_on_new_timers();
+  sys_accel_manager_set_sample_buffer(mg_state, mg, 1);
+  AccelRawData counts[1];
+  AccelManagerState *counts_state = prv_subscribe_on_new_timers();
+  sys_accel_manager_set_raw_counts(counts_state, true);
+  sys_accel_manager_set_sample_buffer(counts_state, counts, 1);
+
+  prv_feed_batch(2048, 1, 32767);
+
+  cl_assert_equal_i(counts[0].x, 2048);
+  cl_assert_equal_i(counts[0].y, 1);
+  cl_assert_equal_i(counts[0].z, -32767);
+  cl_assert_equal_i(mg[0].x, 1000);
+  cl_assert_equal_i(mg[0].y, 0);
+  cl_assert_equal_i(mg[0].z, -15999);
+}
+
+//! Negating the most negative count can't be represented, so it saturates
+void test_accel_manager__an_inverted_full_scale_count_saturates(void) {
+  AccelRawData counts[1];
+  AccelManagerState *state = prv_subscribe_on_new_timers();
+  sys_accel_manager_set_raw_counts(state, true);
+  sys_accel_manager_set_sample_buffer(state, counts, 1);
+
+  prv_feed_batch(0, 0, INT16_MIN);
+
+  cl_assert_equal_i(counts[0].z, INT16_MAX);
+}
+
+//! The scale is unknown until the driver delivers samples, then it is the driver's
+void test_accel_manager__the_scale_is_the_drivers_once_samples_arrive(void) {
+  int32_t scale_num, scale_den;
+  cl_assert(!sys_accel_manager_get_scale(&scale_num, &scale_den));
+
+  prv_feed_batch(0, 0, 0);
+
+  cl_assert(sys_accel_manager_get_scale(&scale_num, &scale_den));
+  cl_assert_equal_i(scale_num, 16000);
+  cl_assert_equal_i(scale_den, 32768);
+}
+
+//! Single samples arrive in milli-g, so their counts are milli-g too
+void test_accel_manager__single_samples_are_their_own_counts(void) {
+  AccelRawData counts[1];
+  AccelManagerState *state = prv_subscribe_on_new_timers();
+  sys_accel_manager_set_raw_counts(state, true);
+  sys_accel_manager_set_sample_buffer(state, counts, 1);
+  int32_t scale_num, scale_den;
+
+  AccelDriverSample sample = {.x = 1234, .timestamp_us = s_now_us};
+  pbl_accel_lock(ACCEL);
+  pbl_accel_report_sample(ACCEL, &sample);
+  pbl_accel_unlock(ACCEL);
+
+  cl_assert_equal_i(counts[0].x, 1234);
+  cl_assert(sys_accel_manager_get_scale(&scale_num, &scale_den));
+  cl_assert_equal_i(scale_num, scale_den);
+}
