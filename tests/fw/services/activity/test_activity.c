@@ -1,8 +1,11 @@
 /* SPDX-FileCopyrightText: 2024 Google LLC */
 /* SPDX-License-Identifier: Apache-2.0 */
 
+#include <errno.h>
+
 #include <pbl/drivers/rtc.h>
 #include <pbl/drivers/vibe.h>
+#include <pbl/kernel/assert.h>
 #include <pbl/kernel/compiler.h>
 #include <pbl/kernel/types.h>
 #include <pbl/logging/logging.h>
@@ -28,7 +31,6 @@
 #include <kernel/events.h>
 #include <shell/prefs.h>
 #include <sys/stat.h>
-#include <system/passert.h>
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096
@@ -178,11 +180,16 @@ AppInstallId app_get_app_id(void) {
 // ======================================================================================
 // Queue stubs, to support the semaphore that activity.c uses to block on a kernel BG callback
 int s_queue_value = 0;
+static bool s_system_task_stalled;
 
 void pbl_sem_init(struct pbl_sem *s, uint32_t initial, uint32_t limit) {
 }
 
 int pbl_sem_take(struct pbl_sem *s, pbl_timeout_t timeout) {
+  if (s_system_task_stalled) {
+    fake_rtc_increment_ticks(PBL_TICK_HZ);
+    return -EAGAIN;
+  }
   while (s_queue_value <= 0) {
     fake_system_task_callbacks_invoke_pending();
   }
@@ -657,6 +664,25 @@ bool activity_algorithm_get_minute_history(HealthMinuteData *minute_data, uint32
   return true;
 }
 
+// Like activity_algorithm_get_minute_history() above, minutes still being written aren't
+// available. The heart rate of each one we return is (% 200) of its timestamp, plus 1.
+static int s_minute_heart_rate_calls;
+bool activity_algorithm_get_minute_heart_rate(uint8_t *heart_rate_bpm, uint32_t num_minutes,
+                                              time_t utc_start) {
+  s_minute_heart_rate_calls++;
+  const uint32_t minute_idx = rtc_get_time() / PBL_SEC_PER_MIN;
+  const time_t last_second_available =
+      (minute_idx - (minute_idx % ALG_MINUTES_PER_FILE_RECORD)) * PBL_SEC_PER_MIN;
+
+  utc_start -= utc_start % PBL_SEC_PER_MIN;
+  for (uint32_t i = 0; i < num_minutes; i++) {
+    const time_t minute_utc = utc_start + i * PBL_SEC_PER_MIN;
+    heart_rate_bpm[i] =
+        (minute_utc + PBL_SEC_PER_MIN > last_second_available) ? 0 : (minute_utc % 200) + 1;
+  }
+  return true;
+}
+
 time_t activity_algorithm_get_last_sleep_utc(void) {
   return s_test_alg_state.last_sleep_utc;
 }
@@ -947,6 +973,7 @@ void test_activity__initialize(void) {
 
 // ---------------------------------------------------------------------------------------
 void test_activity__cleanup(void) {
+  s_system_task_stalled = false;
   activity_stop_tracking();
   fake_system_task_callbacks_invoke_pending();
 }
@@ -1739,6 +1766,111 @@ void test_activity__get_minute_history(void) {
   }
 }
 
+// ---------------------------------------------------------------------------------------
+// Requests larger than one kernel chunk are returned in full and in order
+void test_activity__get_minute_history_chunked(void) {
+  activity_start_tracking(false /*test_mode*/);
+  fake_system_task_callbacks_invoke_pending();
+
+  const uint32_t exp_num_records = 150;
+  HealthMinuteData minutes[exp_num_records];
+
+  time_t utc_start =
+      rtc_get_time() - (exp_num_records + ALG_MINUTES_PER_FILE_RECORD * 2) * PBL_SEC_PER_MIN;
+  utc_start -= utc_start % PBL_SEC_PER_MIN;
+  const time_t exp_utc_start = utc_start;
+
+  stub_pebble_tasks_set_current(PebbleTask_App);
+  uint32_t num_records = exp_num_records;
+  cl_assert(activity_get_minute_history(minutes, &num_records, &utc_start));
+  cl_assert_equal_i(num_records, exp_num_records);
+  cl_assert_equal_i(utc_start, exp_utc_start);
+  for (uint32_t i = 0; i < num_records; i++) {
+    cl_assert_equal_i(minutes[i].steps, (exp_utc_start + i * PBL_SEC_PER_MIN) % 255);
+  }
+}
+
+// ---------------------------------------------------------------------------------------
+// KernelBG must not write into the caller's buffers after the caller timed out
+void test_activity__get_minute_history_timeout(void) {
+  activity_start_tracking(false /*test_mode*/);
+  fake_system_task_callbacks_invoke_pending();
+
+  HealthMinuteData minutes[10];
+  memset(minutes, 0xA5, sizeof(minutes));
+  HealthMinuteData exp_minutes[10];
+  memset(exp_minutes, 0xA5, sizeof(exp_minutes));
+
+  time_t utc_start = rtc_get_time() - ((ALG_MINUTES_PER_FILE_RECORD * 2) * PBL_SEC_PER_MIN);
+
+  stub_pebble_tasks_set_current(PebbleTask_App);
+  s_system_task_stalled = true;
+  uint32_t num_records = ARRAY_LENGTH(minutes);
+  cl_assert(!activity_get_minute_history(minutes, &num_records, &utc_start));
+  cl_assert_equal_i(num_records, 0);
+  cl_assert_equal_i(utc_start, 0);
+  cl_assert_equal_i(fake_system_task_count_callbacks(), 1);
+
+  s_system_task_stalled = false;
+  fake_system_task_callbacks_invoke_pending();
+  cl_assert_equal_m(minutes, exp_minutes, sizeof(minutes));
+}
+
+// ---------------------------------------------------------------------------------------
+// A whole day of heart rates comes back from a single request, unavailable minutes as 0
+void test_activity__get_minute_heart_rate(void) {
+  activity_start_tracking(false /*test_mode*/);
+  fake_system_task_callbacks_invoke_pending();
+
+  const uint32_t num_minutes = PBL_MIN_PER_DAY;
+  uint8_t bpm[num_minutes];
+  memset(bpm, 0xA5, sizeof(bpm));
+  const time_t now = rtc_get_time();
+  const time_t utc_start = now - (now % PBL_SEC_PER_MIN) - (num_minutes - 1) * PBL_SEC_PER_MIN;
+
+  stub_pebble_tasks_set_current(PebbleTask_App);
+  s_minute_heart_rate_calls = 0;
+  cl_assert(activity_get_minute_heart_rate(bpm, num_minutes, utc_start));
+  cl_assert_equal_i(s_minute_heart_rate_calls, 1);
+  for (uint32_t i = 0; i < num_minutes - (ALG_MINUTES_PER_FILE_RECORD * 2); i++) {
+    cl_assert_equal_i(bpm[i], ((utc_start + i * PBL_SEC_PER_MIN) % 200) + 1);
+  }
+  cl_assert_equal_i(bpm[num_minutes - 1], 0);
+}
+
+// ---------------------------------------------------------------------------------------
+// Requests too large to fill in a bounded kernel buffer are refused
+void test_activity__get_minute_heart_rate_too_long(void) {
+  activity_start_tracking(false /*test_mode*/);
+  fake_system_task_callbacks_invoke_pending();
+
+  static uint8_t bpm[ACTIVITY_MINUTE_HEART_RATE_MAX_MINUTES + 1];
+  stub_pebble_tasks_set_current(PebbleTask_App);
+  cl_assert(!activity_get_minute_heart_rate(bpm, ARRAY_LENGTH(bpm), rtc_get_time()));
+  cl_assert_equal_i(fake_system_task_count_callbacks(), 0);
+}
+
+// ---------------------------------------------------------------------------------------
+// KernelBG must not write into the caller's buffer after the caller timed out
+void test_activity__get_minute_heart_rate_timeout(void) {
+  activity_start_tracking(false /*test_mode*/);
+  fake_system_task_callbacks_invoke_pending();
+
+  uint8_t bpm[10];
+  memset(bpm, 0xA5, sizeof(bpm));
+  uint8_t exp_bpm[10];
+  memset(exp_bpm, 0xA5, sizeof(exp_bpm));
+
+  stub_pebble_tasks_set_current(PebbleTask_App);
+  s_system_task_stalled = true;
+  cl_assert(!activity_get_minute_heart_rate(bpm, ARRAY_LENGTH(bpm), rtc_get_time()));
+  cl_assert_equal_i(fake_system_task_count_callbacks(), 1);
+
+  s_system_task_stalled = false;
+  fake_system_task_callbacks_invoke_pending();
+  cl_assert_equal_m(bpm, exp_bpm, sizeof(bpm));
+}
+
 // Used by the test_activity__step_averages() method to figure out what steps/min we should
 // feed in for the given 15-minute time slot
 int prv_expected_steps_per_min(int slot, int multiplier) {
@@ -2078,7 +2210,7 @@ void test_activity__sleep_after_timezone_change(void) {
   // ----------------------------------------------------------------------------
   // Let's start out in EST time when tracking starts. All of our tests start at 5pm UTC, which is
   // 12pm EST. Let's start out in this time zone then switch back to PST right before we fall
-  // asleep. This replicates the conditions that resulted in PBL-24823
+  // asleep. This replicates the conditions of an old sleep tracking bug.
   TimezoneInfo tz_info = {
     .tm_zone = "EST",
     .tm_gmtoff = -5 * PBL_SEC_PER_HOUR,

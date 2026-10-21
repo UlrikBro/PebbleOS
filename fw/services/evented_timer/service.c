@@ -1,17 +1,19 @@
 /* SPDX-FileCopyrightText: 2024 Google LLC */
 /* SPDX-License-Identifier: Apache-2.0 */
 
+#include <pbl/kernel/assert.h>
+#include <pbl/kernel/fatal.h>
 #include <pbl/kernel/mutex.h>
+#include <pbl/kernel/syscall.h>
 #include <pbl/logging/logging.h>
 #include <pbl/services/evented_timer.h>
 #include <pbl/services/new_timer/new_timer.h>
 
 #include <kernel/events.h>
 #include <kernel/pbl_malloc.h>
+#include <kernel/pebble_tasks.h>
 #include <process_management/app_manager.h>
 #include <syscall/syscall.h>
-#include <syscall/syscall_internal.h>
-#include <system/passert.h>
 
 PBL_LOG_MODULE_DEFINE(service_evented_timer, CONFIG_SERVICE_EVENTED_TIMER_LOG_LEVEL);
 
@@ -61,13 +63,8 @@ static EventedTimer *prv_find_timer(TimerID timer_id) {
 //! It accesses the privileged contents of the timer from the client's unprivileged task.
 //! This call deletes the system timer and removes it from the timer list before returning unless
 //! it is a repeating timer.
-DEFINE_SYSCALL(void, sys_evented_timer_consume, TimerID timer_id, EventedTimerCallback *out_cb,
-               void **out_cb_data) {
-  if (PRIVILEGE_WAS_ELEVATED) {
-    syscall_assert_userspace_buffer(out_cb, sizeof(*out_cb));
-    syscall_assert_userspace_buffer(out_cb_data, sizeof(*out_cb_data));
-  }
-
+PBL_SYSCALL(void, sys_evented_timer_consume, (VAL, TimerID, timer_id),
+            (OUT, EventedTimerCallback *, out_cb), (OUT, void **, out_cb_data)) {
   pbl_mutex_lock(&s_mutex, PBL_FOREVER);
 
   EventedTimer *timer = prv_find_timer(timer_id);
@@ -86,7 +83,7 @@ DEFINE_SYSCALL(void, sys_evented_timer_consume, TimerID timer_id, EventedTimerCa
   // check an unprivileged app could probe TimerIDs to find a system timer and
   // read back its kernel callback pointer + data (KASLR-defeating info leak),
   // and additionally cancel that timer (DoS).
-  if (PRIVILEGE_WAS_ELEVATED && timer->target_task != pebble_task_get_current()) {
+  if (from_user && timer->target_task != pebble_task_get_current()) {
     pbl_mutex_unlock(&s_mutex);
     *out_cb = 0;
     return;
@@ -169,7 +166,7 @@ static void prv_sys_timer_callback(void *cb_data) {
       process_manager_send_event_to_process(timer->target_task, &e);
       break;
     default:
-      PBL_CROAK("Invalid task %s", pebble_task_get_name(pebble_task_get_current()));
+      pbl_panic("Invalid task %s", pebble_task_get_name(pebble_task_get_current()));
   }
 }
 

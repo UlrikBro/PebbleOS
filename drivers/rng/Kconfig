@@ -19,8 +19,7 @@ config RNG_NRF5
 config RNG_SF32LB
     bool "SiFli SF32LB"
     default y if SOC_SF32LB52
-    select HAL_SIFLI
-    select HAL_SIFLI_RNG
+    depends on CLK_SF32LB
     help
       Support for the SiFli SF32LB RNG.
 
@@ -35,6 +34,14 @@ config RNG_POSIX
     default y if SOC_POSIX
     help
       Host random number generator.
+
+config RNG_SHELL
+    bool "Shell commands"
+    default y
+    depends on SHELL
+    help
+      The rng shell command, to print random words and check their bit
+      statistics.
 
 module = DRIVER_RNG
 module-str = Random Number Generator

@@ -1,13 +1,10 @@
 {
   "_notes": [ "You need to increase the revision for each change of this file AND",
-              "increase PROCESS_INFO_CURRENT_SDK_VERSION_MINOR in pebble_process_info.h",
-              "You should also make sure you are obeying our API design guidelines:",
-              "https://pebbletechnology.atlassian.net/wiki/display/DEV/SDK+API+Design+Guidelines"
+              "increase PROCESS_INFO_CURRENT_SDK_VERSION_MINOR in pebble_process_info.h"
             ],
   "revision" : "109",
   "version" : "2.0",
   "files": [
-    "include/pbl/drivers/ambient_light.h",
     "include/pbl/drivers/button_id.h",
     "fw/system/status_codes.h",
     "fw/applib/dict.h",
@@ -76,6 +73,7 @@
     "include/pbl/services/accel_manager_types.h",
     "include/pbl/services/battery/battery_state.h",
     "include/pbl/services/clock.h",
+    "include/pbl/services/light_level.h",
     "include/pbl/services/ecompass.h",
     "include/pbl/services/new_timer/new_timer.h",
     "include/pbl/services/wakeup.h",

@@ -8,17 +8,17 @@
 #include <string.h>
 
 #include <pbl/drivers/watchdog.h>
+#include <pbl/kernel/assert.h>
 #include <pbl/kernel/debug.h>
 #include <pbl/kernel/irq.h>
-#include <pbl/kernel/sched.h>
 #include <pbl/kernel/thread.h>
+#include <pbl/kernel/time.h>
 #include <pbl/kernel/types.h>
 #include <pbl/logging/logging.h>
 #include <pbl/task_wdt/task_wdt.h>
 #include <pbl/util/math.h>
 
 #include <system/die.h>
-#include <system/passert.h>
 #include <system/reboot_reason.h>
 
 PBL_LOG_MODULE_DEFINE(task_wdt, CONFIG_TASK_WDT_LOG_LEVEL);

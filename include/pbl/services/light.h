@@ -42,6 +42,20 @@
  */
 void light_init(void);
 
+#ifdef CONFIG_BACKLIGHT_HAS_COLOR
+/**
+ * @ingroup services_light
+ * @brief Reschedule the day/night color switch after a backlight color pref is loaded or changed.
+ */
+void light_handle_color_prefs_changed(void);
+
+/**
+ * @ingroup services_light
+ * @brief Re-apply the system color after the wall clock or time zone changes.
+ */
+void light_handle_clock_change(void);
+#endif
+
 /**
  * @ingroup services_light
  * @brief Handle a button press.
@@ -140,9 +154,9 @@ void light_set_system_color(void);
  * @ingroup services_light
  * @brief Make the system color take precedence over any app color.
  *
- * Reference counted: while held, the LED shows the user's default color even if an app set an
- * override. Used by notifications and other modals to show neutral white without clearing the
- * app's color. No-op on platforms without a color backlight.
+ * Reference counted: while held, the LED shows the user's current system color even if an app
+ * set an override. Used by notifications and other modals to show neutral white without clearing
+ * the app's color. No-op on platforms without a color backlight.
  */
 void light_system_color_request(void);
 
@@ -228,6 +242,22 @@ bool light_is_lit_by_touch(void);
  * @return Ambient light level in lux.
  */
 uint32_t light_get_ambient_lux(void);
+
+/**
+ * @ingroup services_light
+ * @brief Get the ambient light level below which the backlight turns on.
+ *
+ * @return Threshold, in the units of light_get_ambient_lux().
+ */
+uint32_t light_get_dark_threshold(void);
+
+/**
+ * @ingroup services_light
+ * @brief Set the ambient light level below which the backlight turns on.
+ *
+ * @param threshold Threshold, in the units of light_get_ambient_lux().
+ */
+void light_set_dark_threshold(uint32_t threshold);
 
 /** @} */
 

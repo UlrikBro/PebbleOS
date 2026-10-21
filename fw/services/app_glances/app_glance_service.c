@@ -2,6 +2,8 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 
 #include <pbl/drivers/rtc.h>
+#include <pbl/kernel/assert.h>
+#include <pbl/kernel/syscall.h>
 #include <pbl/services/app_glances/app_glance_service.h>
 #include <pbl/services/blob_db/app_glance_db.h>
 #include <pbl/util/math.h>
@@ -14,8 +16,6 @@
 #include <kernel/pbl_malloc.h>
 #include <process_management/app_install_manager.h>
 #include <syscall/syscall.h>
-#include <syscall/syscall_internal.h>
-#include <system/passert.h>
 #include <system/status_codes.h>
 
 //! Return true to continue iteration and false to stop it.
@@ -200,16 +200,14 @@ static AppGlance *prv_copy_user_glance(const AppGlance *glance) {
   return copy;
 }
 
-DEFINE_SYSCALL(bool, sys_app_glance_update, const Uuid *uuid, const AppGlance *glance) {
+PBL_SYSCALL(bool, sys_app_glance_update, (IN, const Uuid *, uuid),
+            (IN_BUF, const AppGlance *, glance, sizeof(*glance))) {
   AppGlance *user_glance = nullptr;
 
-  if (PRIVILEGE_WAS_ELEVATED) {
-    syscall_assert_userspace_buffer(uuid, sizeof(*uuid));
-    syscall_assert_userspace_buffer(glance, sizeof(*glance));
-
+  if (from_user) {
     const PebbleProcessMd *md = sys_process_manager_get_current_process_md();
     if (md == nullptr || !uuid_equal(uuid, &md->uuid)) {
-      syscall_failed();
+      pbl_syscall_fail();
     }
 
     user_glance = prv_copy_user_glance(glance);

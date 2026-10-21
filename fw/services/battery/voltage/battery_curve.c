@@ -14,12 +14,10 @@ typedef struct VoltagePoint {
   uint16_t voltage;
 } VoltagePoint;
 
-// TODO: Move these curves somewhere else. Related: PBL-21049
-
 // TODO(ASTERIX,OBELIX): Needs customization for Asterix/Obelix
 #if defined(CONFIG_BOARD_ASTERIX) || defined(CONFIG_BOARD_OBELIX) ||        \
     defined(CONFIG_BOARD_QEMU_EMERY) || defined(CONFIG_BOARD_QEMU_FLINT) || \
-    defined(CONFIG_BOARD_QEMU_GABBRO) || defined(CONFIG_BOARD_NATIVE_EMERY)
+    defined(CONFIG_BOARD_QEMU_GABBRO) || defined(CONFIG_SOC_POSIX)
 // When the voltage drops below these (mV), the watch will start heading for standby (after delay)
 #define BATTERY_CRITICAL_VOLTAGE_CHARGING    3550
 #define BATTERY_CRITICAL_VOLTAGE_DISCHARGING 3300

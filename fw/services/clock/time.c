@@ -4,12 +4,11 @@
 #include <string.h>
 
 #include <pbl/drivers/rtc.h>
+#include <pbl/kernel/syscall.h>
 #include <pbl/kernel/types.h>
 #include <pbl/services/time.h>
 #include <pbl/util/time.h>
 #include <pbl/util/units.h>
-
-#include <syscall/syscall_internal.h>
 
 // timezone abbreviation
 static char s_timezone_abbr[PBL_TZ_LEN] = {}; // longest timezone abbreviation is 5 char + null
@@ -39,7 +38,7 @@ time_t time_get_dst_start(void) {
   return s_dst_start;
 }
 
-DEFINE_SYSCALL(time_t, sys_time_utc_to_local, time_t t) {
+PBL_SYSCALL(time_t, sys_time_utc_to_local, (VAL, time_t, t)) {
   return time_utc_to_local(t);
 }
 
@@ -150,7 +149,7 @@ time_t time_start_of_today(void) {
   return time_util_get_midnight_of(now);
 }
 
-DEFINE_SYSCALL(time_t, sys_time_start_of_today, void) {
+PBL_SYSCALL(time_t, sys_time_start_of_today) {
   return time_start_of_today();
 }
 

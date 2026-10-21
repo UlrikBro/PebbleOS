@@ -12,7 +12,9 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <pbl/drivers/ambient_light.h>
+#include <pbl/drivers/als.h>
+#include <pbl/kernel/assert.h>
+#include <pbl/kernel/fatal.h>
 #include <pbl/services/blob_db/api.h>
 #include <pbl/services/bluetooth/local_id.h>
 #include <pbl/services/i18n/i18n.h>
@@ -36,7 +38,6 @@
 #include <kernel/event_loop.h>
 #include <kernel/pbl_malloc.h>
 #include <kernel/ui/modals/modal_manager.h>
-#include <kernel/util/sleep.h>
 #include <mfg/mfg_info.h>
 #include <mfg/mfg_serials.h>
 #include <process_management/app_manager.h>
@@ -44,8 +45,8 @@
 #include <shell/normal/battery_ui.h>
 #include <shell/prefs.h>
 #include <shell/system_app_ids.auto.h>
+#include <syscall/syscall.h>
 #include <system/bootbits.h>
-#include <system/passert.h>
 #include <system/version.h>
 
 enum {
@@ -397,7 +398,7 @@ static void prv_als_threshold_menu_push(SettingsSystemData *data) {
   // Give time for backlight to turn off
   // If we don't do this, the text may say the false result
   // until the user changes the value
-  psleep(200);
+  sys_psleep(200);
 
   // Get current ambient light reading to show backlight status
   uint32_t current_reading = light_get_ambient_lux();
@@ -425,7 +426,7 @@ static void prv_als_threshold_menu_push(SettingsSystemData *data) {
 
   // Set reasonable min/max values for ALS threshold (lux domain)
   number_window_set_min(number_window, 0);
-  number_window_set_max(number_window, ambient_light_level_to_lux(AMBIENT_LIGHT_LEVEL_MAX));
+  number_window_set_max(number_window, pbl_als_to_lux(ALS, AMBIENT_LIGHT_LEVEL_MAX));
   number_window_set_step_size(number_window, 1);
   number_window_set_value(number_window, (int32_t)current_threshold);
 
@@ -593,7 +594,7 @@ static void prv_debugging_select_callback(MenuLayer *menu_layer, MenuIndex *cell
       break;
 #endif
     default:
-      WTF;
+      pbl_panic();
   }
   menu_layer_reload_data(menu_layer);
 }
@@ -1301,7 +1302,7 @@ static void prv_draw_row_cb(SettingsCallbacks *context, GContext *ctx, const Lay
     case SystemMenuItem_Count:
       break;
     default:
-      WTF;
+      pbl_panic();
   }
   menu_cell_basic_draw(ctx, cell_layer, i18n_get(s_item_titles[row], data), subtitle, nullptr);
 }
@@ -1333,7 +1334,7 @@ static void prv_select_click_cb(SettingsCallbacks *context, uint16_t row) {
       settings_factory_reset_window_push();
       break;
     default:
-      WTF;
+      pbl_panic();
   }
   settings_menu_reload_data(SettingsMenuItemSystem);
 }

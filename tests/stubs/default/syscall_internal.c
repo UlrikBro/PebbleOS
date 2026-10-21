@@ -3,13 +3,15 @@
 
 #include <errno.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
+#include <pbl/kernel/assert.h>
 #include <pbl/kernel/compiler.h>
+#include <pbl/kernel/syscall.h>
 
 #include <kernel/pebble_tasks.h>
-#include <system/passert.h>
 
 PBL_WEAK bool s_syscall_did_fail;
 
@@ -17,11 +19,11 @@ PBL_WEAK void stubs_syscall_init(void) {
   s_syscall_did_fail = false;
 }
 
-PBL_WEAK [[noreturn]] void syscall_failed(void) {
+PBL_WEAK [[noreturn]] void pbl_syscall_fail(void) {
   s_syscall_did_fail = true;
   printf("Warning: Syscall failed!\n");
 
-  // Use cl_assert_passert() if you want to catch this getting hit.
+  // Use cl_assert_panic() if you want to catch this getting hit.
   PBL_ASSERTN(false);
 }
 
@@ -29,15 +31,15 @@ PBL_WEAK bool syscall_made_from_userspace(void) {
   return true;
 }
 
-PBL_WEAK void syscall_assert_userspace_buffer(const void *buf, size_t num_bytes) {
+PBL_WEAK void pbl_syscall_verify_user(const void *buf, size_t num_bytes) {
   if (!buf) {
-    syscall_failed();
+    pbl_syscall_fail();
   }
   // TODO: What else can we check here?
   return;
 }
 
-PBL_WEAK int syscall_copy_from_user(void *dst, const void *src, size_t num_bytes) {
+PBL_WEAK int pbl_user_copy_from(void *dst, const void *src, size_t num_bytes) {
   if (!src) {
     return -EFAULT;
   }
@@ -45,12 +47,26 @@ PBL_WEAK int syscall_copy_from_user(void *dst, const void *src, size_t num_bytes
   return 0;
 }
 
-PBL_WEAK int syscall_copy_to_user(void *dst, const void *src, size_t num_bytes) {
+PBL_WEAK int pbl_user_copy_to(void *dst, const void *src, size_t num_bytes) {
   if (!dst) {
     return -EFAULT;
   }
   memcpy(dst, src, num_bytes);
   return 0;
+}
+
+PBL_WEAK int pbl_user_strnlen(const char *str, size_t max) {
+  if (!str) {
+    return -EFAULT;
+  }
+  const char *nul = memchr(str, '\0', (max == SIZE_MAX) ? SIZE_MAX : max + 1);
+  return (nul == nullptr) ? -EFAULT : (int)(nul - str);
+}
+
+PBL_WEAK void pbl_syscall_copy_out(struct pbl_syscall_copy_out *out) {
+  if (out->dst != nullptr && pbl_user_copy_to(out->dst, out->src, out->num_bytes) < 0) {
+    pbl_syscall_fail();
+  }
 }
 
 PBL_WEAK void syscall_init_context() {

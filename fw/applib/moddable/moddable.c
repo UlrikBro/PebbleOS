@@ -3,7 +3,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 #include <stddef.h>
 
-#include <pbl/mcu/privilege.h>
+#include <pbl/kernel/syscall.h>
 #include <pbl/services/evented_timer.h>
 
 #include <applib/app.h>
@@ -12,7 +12,6 @@
 #include <applib/ui/dialogs/expandable_dialog.h>
 #include <logging/logging_private.h>
 #include <syscall/syscall.h>
-#include <syscall/syscall_internal.h>
 
 #if defined(CONFIG_MODDABLE_XS) && !defined(CONFIG_RECOVERY_FW)
 #include <kernel/event_loop.h>
@@ -87,7 +86,7 @@ static void prv_build_ffi(txMachine *the, txAPI *api) {
     .the = the,
     .api = api,
   };
-  mcu_call_unprivileged(prv_build_ffi_unprivileged_cb, &call);
+  pbl_user_call(prv_build_ffi_unprivileged_cb, &call);
 }
 
 // Minimum recordSize for the original struct (without flags field)
@@ -97,23 +96,22 @@ static void prv_build_ffi(txMachine *the, txAPI *api) {
 #define kModdableCreationRecordFFISize \
   (offsetof(ModdableCreationRecord, fxBuildFFI) + sizeof(((ModdableCreationRecord *)0)->fxBuildFFI))
 
-// PBL_ALWAYS_INLINE: PRIVILEGE_WAS_ELEVATED is only valid inside the syscall body.
-static PBL_ALWAYS_INLINE void prv_assert_userspace_creation_record(ModdableCreationRecord *cr,
-                                                                   size_t len) {
-  if (PRIVILEGE_WAS_ELEVATED) {
-    syscall_assert_userspace_buffer(cr, len);
+static void prv_assert_userspace_creation_record(bool from_user, ModdableCreationRecord *cr,
+                                                 size_t len) {
+  if (from_user) {
+    pbl_syscall_verify_user(cr, len);
   }
 }
 
-DEFINE_SYSCALL(void, moddable_createMachine, ModdableCreationRecord *cr) {
+PBL_SYSCALL(void, moddable_createMachine, (VAL, ModdableCreationRecord *, cr)) {
   uint32_t flags = 0;
   uint32_t record_size = 0;
 
-  if (PRIVILEGE_WAS_ELEVATED) {
+  if (from_user) {
     const PebbleProcessMd *md = app_manager_get_current_app_md();
     if (pebble_task_get_current() != PebbleTask_App || md == nullptr || !md->is_moddable_app ||
         app_state_get_js_memory_api_context() != nullptr) {
-      syscall_failed();
+      pbl_syscall_fail();
     }
   }
 
@@ -122,14 +120,14 @@ DEFINE_SYSCALL(void, moddable_createMachine, ModdableCreationRecord *cr) {
 
   // Read flags if the record is large enough to include them
   if (cr) {
-    prv_assert_userspace_creation_record(cr, sizeof(cr->recordSize));
+    prv_assert_userspace_creation_record(from_user, cr, sizeof(cr->recordSize));
     record_size = cr->recordSize;
     if (record_size < kModdableCreationRecordMinSize) {
       APP_LOG(APP_LOG_LEVEL_ERROR, "invalid recordSize");
       return;
     }
 
-    prv_assert_userspace_creation_record(cr, record_size);
+    prv_assert_userspace_creation_record(from_user, cr, record_size);
     if (record_size >= kModdableCreationRecordFlagsSize)
       flags = cr->flags;
   }
@@ -224,7 +222,7 @@ DEFINE_SYSCALL(void, moddable_createMachine, ModdableCreationRecord *cr) {
 
 #else
 
-DEFINE_SYSCALL(void, moddable_createMachine, ModdableCreationRecord *cr) {
+PBL_SYSCALL(void, moddable_createMachine, (VAL, ModdableCreationRecord *, cr)) {
   APP_LOG(APP_LOG_LEVEL_ERROR, "Moddable XS not supported in this build");
 }
 

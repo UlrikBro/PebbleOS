@@ -7,7 +7,7 @@
 #include <time.h>
 
 #include <pbl/drivers/accel.h>
-#include <pbl/drivers/ambient_light.h>
+#include <pbl/drivers/als.h>
 #include <pbl/drivers/audio.h>
 #include <pbl/drivers/backlight.h>
 #include <pbl/drivers/battery.h>
@@ -139,12 +139,12 @@ static void prv_format_time(char *buffer, size_t size, uint32_t seconds) {
 static void prv_cleanup_component(AppData *data) {
 #ifdef CONFIG_MAG
   if (data->component == ComponentMag) {
-    mag_release();
+    (void)pbl_mag_set_sampling_interval(MAG, 0U, nullptr);
   }
 #endif
 #ifdef CONFIG_BACKLIGHT_HAS_COLOR
   if (data->component >= ComponentBacklightWhite && data->component <= ComponentBacklightBlue) {
-    backlight_set_color(data->saved_backlight_color);
+    (void)pbl_backlight_set_color(BACKLIGHT, data->saved_backlight_color);
     light_enable(false);
   }
 #else
@@ -162,7 +162,7 @@ static void prv_cleanup_component(AppData *data) {
 
 static void prv_drain_light_enable(AppData *data, bool enable) {
 #ifdef CONFIG_BACKLIGHT_HAS_COLOR
-  backlight_set_color(enable ? 0xFFFFFF : data->saved_backlight_color);
+  (void)pbl_backlight_set_color(BACKLIGHT, enable ? 0xFFFFFF : data->saved_backlight_color);
 #endif
   light_enable(enable);
 }
@@ -170,7 +170,7 @@ static void prv_drain_light_enable(AppData *data, bool enable) {
 static void prv_start_component(AppData *data) {
 #ifdef CONFIG_MAG
   if (data->component == ComponentMag) {
-    mag_start_sampling();
+    (void)pbl_mag_set_sampling_interval(MAG, 200000U, nullptr);
   }
 #endif
 #ifdef CONFIG_BACKLIGHT_HAS_COLOR
@@ -251,7 +251,7 @@ static void prv_run_component_display(AppData *data) {
   switch (data->component) {
     case ComponentAccel: {
       AccelDriverSample sample;
-      accel_peek(&sample);
+      pbl_accel_peek(ACCEL, &sample);
       comp_name = "Accel";
       sniprintf(comp_detail, sizeof(comp_detail), "X:%" PRIi16 " Y:%" PRIi16 " Z:%" PRIi16,
                 sample.x, sample.y, sample.z);
@@ -259,8 +259,8 @@ static void prv_run_component_display(AppData *data) {
     }
 #ifdef CONFIG_MAG
     case ComponentMag: {
-      MagData mag_sample;
-      mag_read_data(&mag_sample);
+      MagData mag_sample = {};
+      (void)pbl_mag_peek(MAG, &mag_sample);
       comp_name = "Mag";
       sniprintf(comp_detail, sizeof(comp_detail), "X:%" PRIi16 " Y:%" PRIi16 " Z:%" PRIi16,
                 mag_sample.x, mag_sample.y, mag_sample.z);
@@ -269,19 +269,19 @@ static void prv_run_component_display(AppData *data) {
 #endif
 #ifdef CONFIG_BACKLIGHT_HAS_COLOR
     case ComponentBacklightWhite:
-      backlight_set_color(0xD0D0D0);
+      (void)pbl_backlight_set_color(BACKLIGHT, 0xD0D0D0);
       comp_name = "BL White";
       break;
     case ComponentBacklightRed:
-      backlight_set_color(0xFF0000);
+      (void)pbl_backlight_set_color(BACKLIGHT, 0xFF0000);
       comp_name = "BL Red";
       break;
     case ComponentBacklightGreen:
-      backlight_set_color(0x00FF00);
+      (void)pbl_backlight_set_color(BACKLIGHT, 0x00FF00);
       comp_name = "BL Green";
       break;
     case ComponentBacklightBlue:
-      backlight_set_color(0x0000FF);
+      (void)pbl_backlight_set_color(BACKLIGHT, 0x0000FF);
       comp_name = "BL Blue";
       break;
 #else
@@ -300,7 +300,8 @@ static void prv_run_component_display(AppData *data) {
       break;
 #endif
     case ComponentALS: {
-      uint32_t level = ambient_light_get_light_level();
+      uint32_t level = 0U;
+      (void)pbl_als_read(ALS, &level);
       comp_name = "ALS";
       sniprintf(comp_detail, sizeof(comp_detail), "Level: %" PRIu32, level);
       break;
@@ -660,7 +661,7 @@ static void prv_handle_init(void) {
     .audio_playing = false,
 #endif
 #ifdef CONFIG_BACKLIGHT_HAS_COLOR
-    .saved_backlight_color = backlight_get_color(),
+    .saved_backlight_color = pbl_backlight_get_color(BACKLIGHT),
 #endif
   };
 

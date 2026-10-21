@@ -171,6 +171,7 @@ pbl_clar_test(test_app_manager
     fw/process_management/pebble_process_info.c
     fw/process_management/app_manager.c
     fw/process_management/pebble_process_md.c
+    fw/process_management/process_runtime.c
     fw/kernel/memory_layout.c
     fw/kernel/util/segment.c
     tests/fakes/fake_rtc.c
@@ -182,6 +183,10 @@ pbl_clar_test(test_process_manager
     fw/process_management/pebble_process_info.c
     fw/process_management/process_manager.c
   OVERRIDES dummy_board
+)
+
+pbl_clar_test(test_syscall_define
+  DEFINES UNITTEST_WITH_SYSCALL_PRIVILEGES=1
 )
 
 pbl_clar_test(test_pebble_app_info
@@ -235,4 +240,10 @@ pbl_clar_test(test_getting_started_button_combo
   SOURCES
     fw/apps/prf/recovery_first_use/getting_started_button_combo.c
   DEFINES CONFIG_RECOVERY_FW
+)
+
+pbl_clar_test(test_event_syscalls
+  SOURCES
+    fw/syscall/event_syscalls.c
+  DEFINES UNITTEST_WITH_SYSCALL_PRIVILEGES=1
 )

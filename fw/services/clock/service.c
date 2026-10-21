@@ -3,6 +3,7 @@
 
 #include <pbl/drivers/rtc.h>
 #include <pbl/kernel/compiler.h>
+#include <pbl/kernel/syscall.h>
 #include <pbl/logging/logging.h>
 #include <pbl/services/alarms/alarm.h>
 #include <pbl/services/analytics/analytics.h>
@@ -23,7 +24,6 @@
 #include <kernel/events.h>
 #include <shell/prefs.h>
 #include <syscall/syscall.h>
-#include <syscall/syscall_internal.h>
 
 #ifndef CONFIG_RECOVERY_FW
 #include <pbl/services/notifications/alerts.h>
@@ -65,15 +65,14 @@ static void prv_handle_timezone_set(TimezoneInfo *tz_info) {
 }
 
 typedef struct PBL_PACKED {
-  // This struct is packed because it mirrors the endpoint definition:
-  // https://pebbletechnology.atlassian.net/wiki/pages/viewpage.action?pageId=491698#PebbleProtocol(BluetoothSerial)-0xb(11)-Time/Clock(bigendian)
+  // Mirrors the Pebble Protocol time endpoint payload (big endian).
   int32_t utc_time;                       // UTC timestamp
   int16_t utc_offset_min;                 // local timestamp - UTC timestamp in mins
   int8_t region_name_len;                 // timezone name length
   char region_name[TIMEZONE_NAME_LENGTH]; // timezone name string
 } TimezoneCBData;
 
-#if !UNITTEST && __SIZEOF_POINTER__ == 4
+#if !UNITTEST && !defined(CONFIG_LIBC_HOST)
 static_assert(sizeof(time_t) == 4, "Sizeof time_t does not match endpoint definition");
 #endif
 
@@ -549,7 +548,7 @@ static void prv_copy_relative_time_string(char *number_buffer, uint8_t number_bu
       i18n_get_with_buffer("Now", word_buffer, word_buffer_size);
       strncpy(number_buffer, "", number_buffer_size);
     } else if (difference <= PBL_SEC_PER_HOUR) {
-      snprintf(number_buffer, number_buffer_size, "%ld", difference / PBL_SEC_PER_MIN);
+      snprintf(number_buffer, number_buffer_size, "%ld", (long)(difference / PBL_SEC_PER_MIN));
       i18n_get_with_buffer(" MIN. TO", word_buffer, word_buffer_size);
     } else {
       prv_copy_time_string_timestamp(number_buffer, number_buffer_size, word_buffer,
@@ -592,7 +591,7 @@ void clock_get_event_relative_time_string(char *number_buffer, int number_buffer
   }
 }
 
-DEFINE_SYSCALL(bool, clock_is_24h_style, void) {
+PBL_SYSCALL(bool, clock_is_24h_style) {
   return shell_prefs_get_clock_24h_style();
 }
 
@@ -600,7 +599,7 @@ void clock_set_24h_style(bool is_24h_style) {
   shell_prefs_set_clock_24h_style(is_24h_style);
 }
 
-DEFINE_SYSCALL(bool, clock_is_timezone_set, void) {
+PBL_SYSCALL(bool, clock_is_timezone_set) {
   return rtc_is_timezone_set(); // If timezone abbr isn't set
 }
 
@@ -634,7 +633,7 @@ void clock_request_time_from_phone(void) {
                          COMM_SESSION_DEFAULT_TIMEOUT);
 }
 
-DEFINE_SYSCALL(time_t, clock_to_timestamp, WeekDay day, int hour, int minute) {
+PBL_SYSCALL(time_t, clock_to_timestamp, (VAL, WeekDay, day), (VAL, int, hour), (VAL, int, minute)) {
   time_t t = sys_get_time();
   struct pbl_tm cal;
   sys_localtime_r(&t, &cal);
@@ -987,9 +986,9 @@ void clock_get_until_time_without_fulltime(char *buffer, int buf_size, time_t ti
   prv_clock_get_relative_time_string(buffer, buf_size, timestamp, true, max_relative_hrs, false);
 }
 
-DEFINE_SYSCALL(void, sys_clock_get_timezone, char *timezone, size_t buffer_size) {
-  if (PRIVILEGE_WAS_ELEVATED) {
-    syscall_assert_userspace_buffer(timezone, TIMEZONE_NAME_LENGTH);
+PBL_SYSCALL(void, sys_clock_get_timezone, (OUT_BUF, char *, timezone, TIMEZONE_NAME_LENGTH),
+            (VAL, size_t, buffer_size)) {
+  if (from_user) {
     buffer_size = MIN(buffer_size, TIMEZONE_NAME_LENGTH);
   }
   clock_get_timezone_region(timezone, buffer_size);
