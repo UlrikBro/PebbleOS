@@ -17,6 +17,7 @@
 #define REG_FIFO_STATUS2  0x3BU
 #define REG_CTRL1_XL      0x10U
 #define REG_CTRL3_C       0x12U
+#define REG_CTRL5_C       0x14U
 #define REG_WAKE_UP_THS   0x5BU
 #define REG_WAKE_UP_DUR   0x5CU
 #define REG_FIFO_DATA_OUT 0x78U
@@ -184,4 +185,13 @@ void test_accel_lsm6dso__shake_sensitivity_maps_to_the_4g_thresholds(void) {
   cl_assert_equal_i(s_regs[REG_WAKE_UP_THS] & 0x3FU, 1);
   cl_assert_equal_i(pbl_accel_set_shake_sensitivity_high(ACCEL, false), 0);
   cl_assert_equal_i(s_regs[REG_WAKE_UP_THS] & 0x3FU, 19);
+}
+
+//! Ultra-low-power mode, unless the build asks for high-performance mode
+void test_accel_lsm6dso__the_power_mode_follows_the_build(void) {
+#if defined(CONFIG_ACCEL_LSM6DSO_HIGH_PERFORMANCE)
+  cl_assert_equal_i(s_regs[REG_CTRL5_C] & 0x80U, 0);
+#else
+  cl_assert_equal_i(s_regs[REG_CTRL5_C] & 0x80U, 0x80U);
+#endif
 }

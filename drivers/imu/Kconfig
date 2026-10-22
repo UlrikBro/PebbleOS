@@ -123,6 +123,20 @@ config ACCEL_LSM6DSO_SCALE_MG
     help
       Acceleration full-scale range in mg (2000, 4000, 8000 or 16000).
 
+config ACCEL_LSM6DSO_HIGH_PERFORMANCE
+    bool "High-performance mode"
+    help
+      Run the accelerometer in high-performance mode instead of
+      ultra-low-power mode, for builds that record data for studies.
+
+      The datasheet (DS12140) gives an RMS noise of 5.5 mg in
+      ultra-low-power mode, and a noise density of 110 ug/sqrt(Hz) at 16 g
+      in high-performance mode, about 0.4 mg RMS at 26 Hz. The cost is a
+      supply current many times higher, so a shorter battery life.
+
+      Build with:
+        pbl configure --board obelix -DCONFIG_ACCEL_LSM6DSO_HIGH_PERFORMANCE=y
+
 endif # ACCEL_LSM6DSO
 
 menuconfig MAG

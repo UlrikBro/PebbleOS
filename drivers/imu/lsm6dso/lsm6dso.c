@@ -30,10 +30,11 @@ static const struct pbl_lsm6dso *s_dev;
 // - Gyroscope is unused; only the accelerometer is configured.
 // - Peeking returns the last FIFO sample when sampling is active, otherwise a
 //   single-shot measurement is performed.
-// - Ultra-low-power mode (XL_ULP_EN) is always used (minimum power). It is
-//   enabled once at init while the accelerometer is powered down (as required
-//   by the datasheet) and never toggled afterwards. The gyroscope is never
-//   enabled, so ULP is allowed.
+// - Ultra-low-power mode (XL_ULP_EN) is used (minimum power), unless
+//   CONFIG_ACCEL_LSM6DSO_HIGH_PERFORMANCE selects high-performance mode (lower
+//   noise). The mode is set once at init while the accelerometer is powered
+//   down (as required by the datasheet) and never toggled afterwards. The
+//   gyroscope is never enabled, so ULP is allowed.
 // - ODR is limited to the [12.5, 208] Hz range (the ULP ODR range).
 // - Shake detection uses 12.5Hz when no active sampling is ongoing.
 // - Wake-up duration absolute time depends on the ODR, a parameter that can
@@ -851,8 +852,13 @@ static int prv_init(const struct pbl_accel *accel) {
   }
 
   // Ultra-low-power mode (accelerometer still powered down here, as required to
-  // toggle XL_ULP_EN). Gyroscope stays in power-down, so ULP is allowed.
+  // toggle XL_ULP_EN). Gyroscope stays in power-down, so ULP is allowed. With
+  // XL_ULP_EN clear, the reset value of XL_HM_MODE selects high-performance mode.
+#if defined(CONFIG_ACCEL_LSM6DSO_HIGH_PERFORMANCE)
+  val = 0U;
+#else
   val = LSM6DSO_CTRL5_C_XL_ULP_EN;
+#endif
   ret = prv_lsm6dso_write(LSM6DSO_CTRL5_C, &val, 1);
   if (!ret) {
     PBL_LOG_ERR("Could not write CTRL5_C register");
