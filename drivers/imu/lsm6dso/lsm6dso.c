@@ -30,10 +30,11 @@ static const struct pbl_lsm6dso *s_dev;
 // - Gyroscope is unused; only the accelerometer is configured.
 // - Peeking returns the last FIFO sample when sampling is active, otherwise a
 //   single-shot measurement is performed.
-// - Ultra-low-power mode (XL_ULP_EN) is always used (minimum power). It is
-//   enabled once at init while the accelerometer is powered down (as required
-//   by the datasheet) and never toggled afterwards. The gyroscope is never
-//   enabled, so ULP is allowed.
+// - Ultra-low-power mode (XL_ULP_EN) is used (minimum power), unless
+//   CONFIG_ACCEL_LSM6DSO_HIGH_PERFORMANCE selects high-performance mode (lower
+//   noise). The mode is set once at init while the accelerometer is powered
+//   down (as required by the datasheet) and never toggled afterwards. The
+//   gyroscope is never enabled, so ULP is allowed.
 // - ODR is limited to the [12.5, 208] Hz range (the ULP ODR range).
 // - Shake detection uses 12.5Hz when no active sampling is ongoing.
 // - Wake-up duration absolute time depends on the ODR, a parameter that can
@@ -63,9 +64,6 @@ static const struct pbl_lsm6dso *s_dev;
 
 // Consecutive stuck-high watchdog passes before a full stream recovery
 #define LSM6DSO_SHAKE_STUCK_PASSES_MAX 3U
-
-// Scale range for 16-bit two's complement samples
-#define LSM6DSO_S16_SCALE_RANGE PBL_BIT(15)
 
 // FIFO tag identifying an accelerometer (XL) sample
 #define LSM6DSO_FIFO_TAG_XL_NC 0x02U
@@ -170,6 +168,11 @@ static const struct pbl_lsm6dso *s_dev;
 
 // WAKE_UP_DUR fields
 #define LSM6DSO_WAKE_UP_DUR_WAKE_DUR_MASK PBL_GENMASK(6, 5)
+#define LSM6DSO_WAKE_UP_DUR_WAKE_THS_W    PBL_BIT(4)
+
+// A WK_THS step is FS/2^6, or FS/2^8 with WAKE_THS_W. Above 4 g use the finer one, so a step is
+// 62.5 mg at both 4 g and 16 g and the thresholds don't depend on the full scale.
+#define LSM6DSO_WAKE_THS_W (CONFIG_ACCEL_LSM6DSO_SCALE_MG > 4000)
 
 // MD1_CFG fields
 #define LSM6DSO_MD1_CFG_INT1_WU PBL_BIT(5)
@@ -237,7 +240,7 @@ static int16_t prv_axis_raw_mg(IMUCoordinateAxis axis, const uint8_t *raw) {
 
   val = s_dev->axis_dir[axis] * (int16_t)(((int32_t)prv_raw_to_s16(&raw[offset * 2U]) *
                                            (int32_t)CONFIG_ACCEL_LSM6DSO_SCALE_MG) /
-                                          (int32_t)LSM6DSO_S16_SCALE_RANGE);
+                                          (int32_t)LSM6DSO_SCALE_DEN);
 
   if (s_dev->state->rotated && (axis == AXIS_X || axis == AXIS_Y)) {
     val *= -1;
@@ -263,7 +266,12 @@ static uint64_t prv_get_curr_system_time_us(void) {
 
 // Convert and dispatch the samples already sitting in raw_sample_buf. Kept free of
 // device I/O so it can run after the I2C reads instead of in between them.
-static void prv_lsm6dso_process_samples(uint16_t num_samples, uint64_t timestamp_us) {
+// read_time_us is when the FIFO was read, which is when its newest sample was taken. The
+// samples read are the oldest ones, with num_unread newer ones left in the FIFO.
+static void prv_lsm6dso_process_samples(uint16_t num_samples, uint16_t num_unread,
+                                        uint64_t read_time_us) {
+  const uint32_t interval_us = s_dev->state->sampling_interval_us;
+  const uint64_t last_time_us = read_time_us - (uint64_t)num_unread * interval_us;
   // Each FIFO word is a tag byte followed by 6 data bytes; point the batch at the
   // first data byte and let the service step over the tags via the stride.
   int8_t rotate = s_dev->state->rotated ? -1 : 1;
@@ -281,10 +289,8 @@ static void prv_lsm6dso_process_samples(uint16_t num_samples, uint64_t timestamp
                .sign = (int8_t)(s_dev->axis_dir[AXIS_Y] * rotate)},
           [AXIS_Z] = {.offset = s_dev->axis_map[AXIS_Z] * 2U, .sign = s_dev->axis_dir[AXIS_Z]},
         },
-    .scale_num = CONFIG_ACCEL_LSM6DSO_SCALE_MG,
-    .scale_den = LSM6DSO_S16_SCALE_RANGE,
-    .first_timestamp_us = timestamp_us,
-    .sampling_interval_us = s_dev->state->sampling_interval_us,
+    .first_timestamp_us = last_time_us - (uint64_t)(num_samples - 1U) * interval_us,
+    .sampling_interval_us = interval_us,
   };
 
   pbl_accel_report_samples(&s_dev->accel, &batch);
@@ -359,6 +365,7 @@ static bool prv_lsm6dso_enable_fifo(uint16_t num_samples) {
 //! Salvage and dispatch any samples queued in the FIFO
 static void prv_lsm6dso_drain_fifo(void) {
   uint8_t status[2];
+  uint16_t queued;
   uint16_t samples;
 
   if (!prv_lsm6dso_read(LSM6DSO_FIFO_STATUS1, status, 2)) {
@@ -366,8 +373,8 @@ static void prv_lsm6dso_drain_fifo(void) {
     return;
   }
 
-  samples = (PBL_FIELD_GET(LSM6DSO_FIFO_STATUS2_DIFF_HI_MASK, status[1]) << 8U) | status[0];
-  samples = MIN(samples, LSM6DSO_FIFO_SIZE);
+  queued = (PBL_FIELD_GET(LSM6DSO_FIFO_STATUS2_DIFF_HI_MASK, status[1]) << 8U) | status[0];
+  samples = MIN(queued, LSM6DSO_FIFO_SIZE);
   if (samples == 0U) {
     return;
   }
@@ -377,7 +384,7 @@ static void prv_lsm6dso_drain_fifo(void) {
     return;
   }
 
-  prv_lsm6dso_process_samples(samples, prv_get_curr_system_time_us());
+  prv_lsm6dso_process_samples(samples, queued - samples, prv_get_curr_system_time_us());
   s_dev->state->last_fifo_read_tick = rtc_get_ticks();
 }
 
@@ -432,6 +439,7 @@ static bool prv_lsm6dso_service_int1(Lsm6dsoInt1Pass pass, bool *fifo_progress) 
   bool action_taken = false;
   bool fifo_overrun = false;
   bool shake = false;
+  uint16_t queued = 0U;
   uint16_t samples = 0U;
   uint64_t timestamp_us = 0U;
 
@@ -451,11 +459,9 @@ static bool prv_lsm6dso_service_int1(Lsm6dsoInt1Pass pass, bool *fifo_progress) 
     if ((fifo_status[1] & LSM6DSO_FIFO_STATUS2_FIFO_OVR_IA) != 0U) {
       fifo_overrun = true;
     } else if ((fifo_status[1] & LSM6DSO_FIFO_STATUS2_FIFO_WTM_IA) != 0U) {
-      samples =
+      queued =
           (PBL_FIELD_GET(LSM6DSO_FIFO_STATUS2_DIFF_HI_MASK, fifo_status[1]) << 8U) | fifo_status[0];
-      if (samples > LSM6DSO_FIFO_SIZE) {
-        samples = LSM6DSO_FIFO_SIZE;
-      }
+      samples = MIN(queued, LSM6DSO_FIFO_SIZE);
 
       if (samples > 0U) {
         if (!prv_lsm6dso_read_fifo(samples)) {
@@ -484,7 +490,7 @@ static bool prv_lsm6dso_service_int1(Lsm6dsoInt1Pass pass, bool *fifo_progress) 
     action_taken = true;
     *fifo_progress = true;
   } else if (samples > 0U) {
-    prv_lsm6dso_process_samples(samples, timestamp_us);
+    prv_lsm6dso_process_samples(samples, queued - samples, timestamp_us);
     action_taken = true;
     *fifo_progress = true;
   }
@@ -612,8 +618,8 @@ static bool prv_configure_odr(uint32_t sampling_interval_us, bool shake_detectio
 
   val = PBL_FIELD_PREP(LSM6DSO_CTRL1_XL_ODR_MASK, odr) | prv_fs_bits();
 
-  PBL_LOG_DBG("Configuring ODR to %" PRIu32 " ms (%" PRIu32 " mHz)", sampling_interval_us / 1000UL,
-              sampling_interval_us > 0UL ? 1000000000UL / sampling_interval_us : 0UL);
+  PBL_LOG_DBG("Configuring ODR to %" PRIu32 " ms (%" PRIu32 " mHz)", sampling_interval_us / 1000U,
+              sampling_interval_us > 0U ? 1000000000U / sampling_interval_us : 0U);
 
   ret = prv_lsm6dso_write(LSM6DSO_CTRL1_XL, &val, 1);
   if (!ret) {
@@ -849,8 +855,13 @@ static int prv_init(const struct pbl_accel *accel) {
   }
 
   // Ultra-low-power mode (accelerometer still powered down here, as required to
-  // toggle XL_ULP_EN). Gyroscope stays in power-down, so ULP is allowed.
+  // toggle XL_ULP_EN). Gyroscope stays in power-down, so ULP is allowed. With
+  // XL_ULP_EN clear, the reset value of XL_HM_MODE selects high-performance mode.
+#if defined(CONFIG_ACCEL_LSM6DSO_HIGH_PERFORMANCE)
+  val = 0U;
+#else
   val = LSM6DSO_CTRL5_C_XL_ULP_EN;
+#endif
   ret = prv_lsm6dso_write(LSM6DSO_CTRL5_C, &val, 1);
   if (!ret) {
     PBL_LOG_ERR("Could not write CTRL5_C register");
@@ -874,7 +885,8 @@ static int prv_init(const struct pbl_accel *accel) {
   }
 
   // Configure wake-up threshold defaults
-  val = PBL_FIELD_PREP(LSM6DSO_WAKE_UP_DUR_WAKE_DUR_MASK, CONFIG_ACCEL_LSM6DSO_WK_DUR_DEFAULT);
+  val = PBL_FIELD_PREP(LSM6DSO_WAKE_UP_DUR_WAKE_DUR_MASK, CONFIG_ACCEL_LSM6DSO_WK_DUR_DEFAULT) |
+        (LSM6DSO_WAKE_THS_W ? LSM6DSO_WAKE_UP_DUR_WAKE_THS_W : 0U);
   ret = prv_lsm6dso_write(LSM6DSO_WAKE_UP_DUR, &val, 1);
   if (!ret) {
     PBL_LOG_ERR("Could not write WAKE_UP_DUR register");

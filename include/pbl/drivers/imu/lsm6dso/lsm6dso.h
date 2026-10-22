@@ -47,6 +47,8 @@
 #define LSM6DSO_SAMPLE_SIZE_BYTES 6
 /** @brief FIFO word size in bytes as read from FIFO_DATA_OUT (tag byte plus sample). */
 #define LSM6DSO_FIFO_WORD_SIZE_BYTES 7
+/** @brief Full scale in 16-bit counts: mg = count * CONFIG_ACCEL_LSM6DSO_SCALE_MG / this. */
+#define LSM6DSO_SCALE_DEN 32768
 /** @brief FIFO watermark in samples (the FIFO holds up to 512). */
 #define LSM6DSO_FIFO_THRESHOLD 128
 /** @brief Read buffer capacity in samples, sized to the watermark. */
@@ -120,15 +122,16 @@ extern const struct pbl_accel_ops pbl_lsm6dso_ops;
  * @param ... Designated initializers of the remaining fields: @c int1, @c int1_in, @c axis_map
  *            and @c axis_dir.
  */
-#define PBL_LSM6DSO_DEFINE(sym, _bus, _addr, ...)                            \
-  PBL_ACCEL_STATE_DEFINE(sym);                                               \
-  static LSM6DSOState sym##_lsm6dso_state;                                   \
-  const struct pbl_lsm6dso sym = {                                           \
-    .accel = PBL_ACCEL_INIT(sym, "lsm6dso", &(_bus)->dev, &pbl_lsm6dso_ops), \
-    .state = &sym##_lsm6dso_state,                                           \
-    .i2c = PBL_I2C_DEV(_bus, _addr),                                         \
-    __VA_ARGS__,                                                             \
-  };                                                                         \
+#define PBL_LSM6DSO_DEFINE(sym, _bus, _addr, ...)                              \
+  PBL_ACCEL_STATE_DEFINE(sym);                                                 \
+  static LSM6DSOState sym##_lsm6dso_state;                                     \
+  const struct pbl_lsm6dso sym = {                                             \
+    .accel = PBL_ACCEL_INIT(sym, "lsm6dso", &(_bus)->dev, &pbl_lsm6dso_ops,    \
+                            CONFIG_ACCEL_LSM6DSO_SCALE_MG, LSM6DSO_SCALE_DEN), \
+    .state = &sym##_lsm6dso_state,                                             \
+    .i2c = PBL_I2C_DEV(_bus, _addr),                                           \
+    __VA_ARGS__,                                                               \
+  };                                                                           \
   PBL_DEVICE_REGISTER(sym, &sym.accel.dev)
 
 /** @} */

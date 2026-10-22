@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include <pbl/services/accel_manager.h>
+#include <pbl/util/size.h>
 
 #include <applib/accel_service.h>
 #include <applib/accel_service_private.h>
@@ -50,6 +51,8 @@ struct AccelManagerState {
   bool raw_counts;
   //! Whether raw counts were chosen before the first buffer, as the real manager needs
   bool raw_counts_before_buffer;
+  bool native_rate;
+  bool native_rate_before_buffer;
 };
 
 #define FAKE_SUBSCRIPTION_SLOTS 4
@@ -184,14 +187,26 @@ void sys_accel_manager_set_raw_counts(AccelManagerState *state, bool raw_counts)
   state->raw_counts_before_buffer = (state->generation == 0);
 }
 
-// 0/0 until the accelerometer has delivered samples
+void sys_accel_manager_set_native_rate(AccelManagerState *state, bool native_rate) {
+  prv_assert_live(state);
+  state->native_rate = native_rate;
+  state->native_rate_before_buffer = (state->generation == 0);
+}
+
+// 26 Hz, the rate a 25 Hz request runs the LSM6DSO at
+#define FAKE_NATIVE_INTERVAL_US 38461
+
+uint32_t sys_accel_manager_get_sampling_interval(AccelManagerState *state) {
+  prv_assert_live(state);
+  return state->native_rate ? FAKE_NATIVE_INTERVAL_US : 1000000 / ACCEL_SAMPLING_25HZ;
+}
+
 static int32_t s_scale_num;
 static int32_t s_scale_den;
 
-bool sys_accel_manager_get_scale(int32_t *scale_num, int32_t *scale_den) {
+void sys_accel_manager_get_scale(int32_t *scale_num, int32_t *scale_den) {
   *scale_num = s_scale_num;
   *scale_den = s_scale_den;
-  return s_scale_den != 0;
 }
 
 // Posts a data event for the current subscription and returns its context
@@ -306,8 +321,8 @@ void test_accel_service__initialize(void) {
   s_timestamps[1] = 0;
   s_session = nullptr;
   s_read_after_change = 0;
-  s_scale_num = 0;
-  s_scale_den = 0;
+  s_scale_num = 16000;
+  s_scale_den = 32768;
   stub_pebble_tasks_set_current(PebbleTask_App);
 }
 
@@ -847,15 +862,46 @@ void test_accel_service__a_raw_data_subscription_gets_milli_g(void) {
   cl_assert(!s_current->raw_counts);
 }
 
-//! Counts per g come from the manager's scale, and are 0 until it knows it
+//! Counts per g come from the manager's scale, with no subscription or samples needed
 void test_accel_service__counts_per_g_follow_the_scale(void) {
-  cl_assert_equal_i(accel_service_get_counts_per_g(), 0);
+  const struct {
+    int32_t scale_mg;
+    int32_t counts_per_g;
+  } scales[] = {{2000, 16384}, {4000, 8192}, {8000, 4096}, {16000, 2048}};
+  for (size_t i = 0; i < ARRAY_LENGTH(scales); i++) {
+    s_scale_num = scales[i].scale_mg;
+    s_scale_den = 32768;
+    cl_assert_equal_i(accel_service_get_counts_per_g(), scales[i].counts_per_g);
+  }
 
-  s_scale_num = 16000;
-  s_scale_den = 32768;
-  cl_assert_equal_i(accel_service_get_counts_per_g(), 2048);
-
+  // Counts that are milli-g, as on QEMU
   s_scale_num = 1;
   s_scale_den = 1;
   cl_assert_equal_i(accel_service_get_counts_per_g(), 1000);
+}
+
+//! A native rate subscription asks for counts at the driver's rate before handing over a buffer
+void test_accel_service__a_native_rate_subscription_gets_counts_at_the_drivers_rate(void) {
+  accel_raw_counts_native_service_subscribe(1, prv_raw_data_handler);
+
+  cl_assert(s_current->raw_counts);
+  cl_assert(s_current->raw_counts_before_buffer);
+  cl_assert(s_current->native_rate);
+  cl_assert(s_current->native_rate_before_buffer);
+  cl_assert_equal_i(accel_service_get_sampling_interval_us(), FAKE_NATIVE_INTERVAL_US);
+  prv_deliver(1);
+  cl_assert_equal_i(s_raw_data_handler_calls, 1);
+}
+
+//! Other subscriptions keep the requested rate
+void test_accel_service__a_raw_counts_subscription_keeps_the_requested_rate(void) {
+  cl_assert_equal_i(accel_service_get_sampling_interval_us(), 0);
+
+  accel_raw_counts_service_subscribe(1, prv_raw_data_handler);
+
+  cl_assert(!s_current->native_rate);
+  cl_assert_equal_i(accel_service_get_sampling_interval_us(), 40000);
+
+  accel_data_service_unsubscribe();
+  cl_assert_equal_i(accel_service_get_sampling_interval_us(), 0);
 }

@@ -58,5 +58,6 @@ static const struct pbl_accel_ops s_ops = {
 };
 
 PBL_ACCEL_STATE_DEFINE(pbl_accel_posix);
-const struct pbl_accel pbl_accel_posix = PBL_ACCEL_INIT(pbl_accel_posix, "accel", nullptr, &s_ops);
+const struct pbl_accel pbl_accel_posix =
+    PBL_ACCEL_INIT(pbl_accel_posix, "accel", nullptr, &s_ops, 1, 1);
 PBL_DEVICE_REGISTER(pbl_accel_posix, &pbl_accel_posix.dev);

@@ -59,7 +59,7 @@ typedef struct {
  * @brief Batch of raw samples in a driver-owned buffer.
  *
  * Handed to the listener so it can scale and copy the samples in one pass
- * instead of taking a callback per sample.
+ * instead of taking a callback per sample. The scale is the device's, see struct pbl_accel.
  */
 typedef struct {
   /** First raw sample, past any per-sample header. */
@@ -75,10 +75,6 @@ typedef struct {
     /** Sign applied to the value, +1 or -1. */
     int8_t sign;
   } axis[3];
-  /** Raw-count to milli-g numerator: mg = raw * scale_num / scale_den. */
-  int32_t scale_num;
-  /** Raw-count to milli-g denominator. */
-  int32_t scale_den;
   /** Timestamp of the first sample, in microseconds since the epoch. */
   uint64_t first_timestamp_us;
   /** Interval between samples, in microseconds. */
@@ -172,6 +168,10 @@ struct pbl_accel {
   const struct pbl_accel_ops *ops;
   /** Runtime state. */
   struct pbl_accel_state *state;
+  /** Raw-count to milli-g numerator: mg = raw * scale_num / scale_den. Fixed for the device. */
+  int32_t scale_num;
+  /** Raw-count to milli-g denominator. */
+  int32_t scale_den;
 };
 
 /** @brief The board's accelerometer. */
@@ -195,12 +195,16 @@ extern const struct pbl_accel *const ACCEL;
  * @param _name Name.
  * @param _parent Parent device, such as the I2C bus, or NULL.
  * @param _ops Driver operations.
+ * @param _scale_num Raw-count to milli-g numerator, see struct pbl_accel.
+ * @param _scale_den Raw-count to milli-g denominator.
  */
-#define PBL_ACCEL_INIT(sym, _name, _parent, _ops)                             \
+#define PBL_ACCEL_INIT(sym, _name, _parent, _ops, _scale_num, _scale_den)     \
   {                                                                           \
     .dev = PBL_DEVICE_INIT(sym, _name, pbl_accel_dev_init, _parent, nullptr), \
     .ops = (_ops),                                                            \
     .state = &sym##_accel_state,                                              \
+    .scale_num = (_scale_num),                                                \
+    .scale_den = (_scale_den),                                                \
   }
 
 /**
@@ -379,7 +383,8 @@ void pbl_accel_report_samples(const struct pbl_accel *accel, const AccelRawBatch
 /**
  * @brief Report a single sample to the listener, as a one-sample batch.
  *
- * Same rules as pbl_accel_report_samples().
+ * Same rules as pbl_accel_report_samples(). The sample is in milli-g, so only a device whose
+ * counts are milli-g (scale 1/1) may report single samples.
  *
  * @param accel Accelerometer.
  * @param sample Sample.

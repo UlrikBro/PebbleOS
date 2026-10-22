@@ -97,9 +97,10 @@ static const struct pbl_accel_ops s_fake_ops = {
   .set_double_tap_detection = prv_set_detection,
 };
 
+// Counts are milli-g unless a test gives the fake a full scale
 PBL_ACCEL_STATE_DEFINE(s_fake_accel);
-static const struct pbl_accel s_fake_accel =
-    PBL_ACCEL_INIT(s_fake_accel, "accel", nullptr, &s_fake_ops);
+static struct pbl_accel s_fake_accel =
+    PBL_ACCEL_INIT(s_fake_accel, "accel", nullptr, &s_fake_ops, 1, 1);
 const struct pbl_accel *const ACCEL = &s_fake_accel;
 
 // Data events for a NewTimers subscriber land here, so a test can count them
@@ -127,6 +128,8 @@ void test_accel_manager__initialize(void) {
   s_force_sampling_interval = false;
   s_posted_events = 0;
   s_new_timer_queue_full = false;
+  s_fake_accel.scale_num = 1;
+  s_fake_accel.scale_den = 1;
 }
 
 void test_accel_manager__cleanup(void) {
@@ -480,7 +483,13 @@ void test_accel_manager__a_consume_on_new_timers_hands_over_a_waiting_batch(void
 // Raw counts
 //////////////////////////////////////////
 
-// Feeds one sample as a driver batch at 16 g full scale, with z mounted upside down
+// Makes the fake a 16 g accelerometer
+static void prv_set_16g(void) {
+  s_fake_accel.scale_num = 16000;
+  s_fake_accel.scale_den = 32768;
+}
+
+// Feeds one sample as a driver batch, with z mounted upside down
 static void prv_feed_batch(int16_t x, int16_t y, int16_t z) {
   const int16_t raw[3] = {x, y, z};
   AccelRawBatch batch = {
@@ -488,8 +497,6 @@ static void prv_feed_batch(int16_t x, int16_t y, int16_t z) {
     .num_samples = 1,
     .stride = sizeof(raw),
     .axis = {{.offset = 0, .sign = 1}, {.offset = 2, .sign = 1}, {.offset = 4, .sign = -1}},
-    .scale_num = 16000,
-    .scale_den = 32768,
     .first_timestamp_us = s_now_us,
     .sampling_interval_us = 1000000 / ACCEL_SAMPLING_25HZ,
   };
@@ -501,6 +508,7 @@ static void prv_feed_batch(int16_t x, int16_t y, int16_t z) {
 
 //! The same batch reaches a raw counts subscriber as counts and the others as milli-g
 void test_accel_manager__a_raw_counts_subscriber_gets_counts_and_others_milli_g(void) {
+  prv_set_16g();
   AccelRawData mg[1];
   AccelManagerState *mg_state = prv_subscribe_on_new_timers();
   sys_accel_manager_set_sample_buffer(mg_state, mg, 1);
@@ -521,6 +529,7 @@ void test_accel_manager__a_raw_counts_subscriber_gets_counts_and_others_milli_g(
 
 //! Negating the most negative count can't be represented, so it saturates
 void test_accel_manager__an_inverted_full_scale_count_saturates(void) {
+  prv_set_16g();
   AccelRawData counts[1];
   AccelManagerState *state = prv_subscribe_on_new_timers();
   sys_accel_manager_set_raw_counts(state, true);
@@ -531,14 +540,13 @@ void test_accel_manager__an_inverted_full_scale_count_saturates(void) {
   cl_assert_equal_i(counts[0].z, INT16_MAX);
 }
 
-//! The scale is unknown until the driver delivers samples, then it is the driver's
-void test_accel_manager__the_scale_is_the_drivers_once_samples_arrive(void) {
+//! The scale is the driver's from the start, before any sample arrives
+void test_accel_manager__the_scale_is_the_drivers_before_any_sample(void) {
+  prv_set_16g();
   int32_t scale_num, scale_den;
-  cl_assert(!sys_accel_manager_get_scale(&scale_num, &scale_den));
 
-  prv_feed_batch(0, 0, 0);
+  sys_accel_manager_get_scale(&scale_num, &scale_den);
 
-  cl_assert(sys_accel_manager_get_scale(&scale_num, &scale_den));
   cl_assert_equal_i(scale_num, 16000);
   cl_assert_equal_i(scale_den, 32768);
 }
@@ -557,6 +565,75 @@ void test_accel_manager__single_samples_are_their_own_counts(void) {
   pbl_accel_unlock(ACCEL);
 
   cl_assert_equal_i(counts[0].x, 1234);
-  cl_assert(sys_accel_manager_get_scale(&scale_num, &scale_den));
+  sys_accel_manager_get_scale(&scale_num, &scale_den);
   cl_assert_equal_i(scale_num, scale_den);
+}
+
+// Native rate
+//////////////////////////////////////////
+
+// Feeds a batch of samples at the driver's interval, with x the sample's index
+static void prv_feed_indexed_batch(int n) {
+  int16_t raw[32][3] = {};
+  cl_assert(n <= (int)ARRAY_LENGTH(raw));
+  for (int i = 0; i < n; i++) {
+    raw[i][0] = i;
+  }
+  AccelRawBatch batch = {
+    .data = (const uint8_t *)raw,
+    .num_samples = n,
+    .stride = sizeof(raw[0]),
+    .axis = {{.offset = 0, .sign = 1}, {.offset = 2, .sign = 1}, {.offset = 4, .sign = 1}},
+    .first_timestamp_us = s_now_us,
+    .sampling_interval_us = s_sampling_interval_us,
+  };
+  s_now_us += n * s_sampling_interval_us;
+  pbl_accel_lock(ACCEL);
+  pbl_accel_report_samples(ACCEL, &batch);
+  pbl_accel_unlock(ACCEL);
+}
+
+// A 25 Hz subscription for raw counts, on a driver that runs at 26 Hz
+static AccelManagerState *prv_subscribe_raw_counts_at_26hz(AccelRawData *buf, uint32_t n,
+                                                           bool native_rate) {
+  s_sampling_interval_us = 38461;
+  s_force_sampling_interval = true;
+  AccelManagerState *state = prv_subscribe_on_new_timers();
+  sys_accel_manager_set_raw_counts(state, true);
+  sys_accel_manager_set_native_rate(state, native_rate);
+  sys_accel_manager_set_sample_buffer(state, buf, n);
+  return state;
+}
+
+//! Raw counts at a rate the driver doesn't have are thinned by dropping samples, unchanged
+void test_accel_manager__raw_counts_are_subsampled_by_dropping_samples(void) {
+  AccelRawData counts[25];
+  AccelManagerState *state = prv_subscribe_raw_counts_at_26hz(counts, 25, false);
+
+  prv_feed_indexed_batch(26);
+
+  // One sample in 26 is dropped, so the spacing isn't even
+  cl_assert_equal_i(counts[0].x, 0);
+  for (int i = 1; i < 25; i++) {
+    cl_assert_equal_i(counts[i].x, i + 1);
+  }
+  cl_assert_equal_i(sys_accel_manager_get_sampling_interval(state), 40000);
+}
+
+//! A native rate subscription gets every sample, at the driver's interval
+void test_accel_manager__a_native_rate_subscriber_gets_every_sample(void) {
+  AccelRawData counts[26];
+  AccelManagerState *state = prv_subscribe_raw_counts_at_26hz(counts, 26, true);
+  AccelRawData thinned[25];
+  AccelManagerState *thinned_state = prv_subscribe_raw_counts_at_26hz(thinned, 25, false);
+
+  prv_feed_indexed_batch(26);
+
+  for (int i = 0; i < 26; i++) {
+    cl_assert_equal_i(counts[i].x, i);
+  }
+  cl_assert_equal_i(sys_accel_manager_get_sampling_interval(state), 38461);
+  // ... while the other subscription is still thinned
+  cl_assert_equal_i(thinned[1].x, 2);
+  cl_assert_equal_i(sys_accel_manager_get_sampling_interval(thinned_state), 40000);
 }

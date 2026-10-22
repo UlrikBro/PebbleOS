@@ -27,6 +27,11 @@
 #define LIS2DW12_FIFO_SIZE 32
 /** @brief Sample size in bytes (X, Y, Z, 16 bits each). */
 #define LIS2DW12_SAMPLE_SIZE_BYTES 6
+/**
+ * @brief Full scale in 16-bit counts: mg = count * CONFIG_ACCEL_LIS2DW12_SCALE_MG / this. Samples
+ * are 12-bit, left-justified, so counts move in steps of 16.
+ */
+#define LIS2DW12_SCALE_DEN 32768
 
 /** @brief LIS2DW12 driver state, owned by the driver. */
 typedef struct LIS2DW12State {
@@ -98,15 +103,16 @@ extern const struct pbl_accel_ops pbl_lis2dw12_ops;
  * @param ... Designated initializers of the remaining fields: @c int1, @c int1_in, @c axis_map
  *            and @c axis_dir.
  */
-#define PBL_LIS2DW12_DEFINE(sym, _bus, _addr, ...)                             \
-  PBL_ACCEL_STATE_DEFINE(sym);                                                 \
-  static LIS2DW12State sym##_lis2dw12_state;                                   \
-  const struct pbl_lis2dw12 sym = {                                            \
-    .accel = PBL_ACCEL_INIT(sym, "lis2dw12", &(_bus)->dev, &pbl_lis2dw12_ops), \
-    .state = &sym##_lis2dw12_state,                                            \
-    .i2c = PBL_I2C_DEV(_bus, _addr),                                           \
-    __VA_ARGS__,                                                               \
-  };                                                                           \
+#define PBL_LIS2DW12_DEFINE(sym, _bus, _addr, ...)                               \
+  PBL_ACCEL_STATE_DEFINE(sym);                                                   \
+  static LIS2DW12State sym##_lis2dw12_state;                                     \
+  const struct pbl_lis2dw12 sym = {                                              \
+    .accel = PBL_ACCEL_INIT(sym, "lis2dw12", &(_bus)->dev, &pbl_lis2dw12_ops,    \
+                            CONFIG_ACCEL_LIS2DW12_SCALE_MG, LIS2DW12_SCALE_DEN), \
+    .state = &sym##_lis2dw12_state,                                              \
+    .i2c = PBL_I2C_DEV(_bus, _addr),                                             \
+    __VA_ARGS__,                                                                 \
+  };                                                                             \
   PBL_DEVICE_REGISTER(sym, &sym.accel.dev)
 
 /** @} */

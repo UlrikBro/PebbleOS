@@ -168,13 +168,36 @@ int sys_accel_manager_set_sample_buffer(AccelManagerState *state, AccelRawData *
 void sys_accel_manager_set_raw_counts(AccelManagerState *state, bool raw_counts);
 
 /**
+ * @brief Choose whether a subscription gets every sample at the driver's rate.
+ *
+ * The driver runs at the fastest rate any subscriber asks for, rounded up to a rate it supports.
+ * Other subscriptions get that stream thinned to their own rate by dropping samples, so their
+ * samples are unevenly spaced. A native rate subscription gets every sample instead, evenly
+ * spaced at sys_accel_manager_get_sampling_interval().
+ *
+ * @param state Subscription.
+ * @param native_rate true for the driver's rate, false for the requested rate (the default).
+ */
+void sys_accel_manager_set_native_rate(AccelManagerState *state, bool native_rate);
+
+/**
+ * @brief Get the interval between the samples of a subscription.
+ *
+ * @param state Subscription.
+ * @return The driver's sampling interval for a native rate subscription, which changes when
+ * another subscriber asks for a faster rate; otherwise the mean interval of the requested rate.
+ */
+uint32_t sys_accel_manager_get_sampling_interval(AccelManagerState *state);
+
+/**
  * @brief Get the scale of raw counts: mg = counts * scale_num / scale_den.
+ *
+ * The accelerometer's fixed scale, known from boot.
  *
  * @param[out] scale_num Numerator.
  * @param[out] scale_den Denominator.
- * @return false, with both 0, until the accelerometer has delivered its first sample.
  */
-bool sys_accel_manager_get_scale(int32_t *scale_num, int32_t *scale_den);
+void sys_accel_manager_get_scale(int32_t *scale_num, int32_t *scale_den);
 
 /**
  * @brief Get the number of samples currently in a subscription's buffer.
