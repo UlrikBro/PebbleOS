@@ -170,11 +170,12 @@ void sys_accel_manager_set_raw_counts(AccelManagerState *state, bool raw_counts)
 /**
  * @brief Get the scale of raw counts: mg = counts * scale_num / scale_den.
  *
+ * The accelerometer's fixed scale, known from boot.
+ *
  * @param[out] scale_num Numerator.
  * @param[out] scale_den Denominator.
- * @return false, with both 0, until the accelerometer has delivered its first sample.
  */
-bool sys_accel_manager_get_scale(int32_t *scale_num, int32_t *scale_den);
+void sys_accel_manager_get_scale(int32_t *scale_num, int32_t *scale_den);
 
 /**
  * @brief Get the number of samples currently in a subscription's buffer.

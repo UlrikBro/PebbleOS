@@ -4,6 +4,7 @@
 #include <errno.h>
 
 #include <pbl/drivers/accel.h>
+#include <pbl/kernel/assert.h>
 #include <pbl/util/misc.h>
 
 int pbl_accel_dev_init(const struct pbl_device *dev) {
@@ -235,6 +236,8 @@ void pbl_accel_report_samples(const struct pbl_accel *accel, const AccelRawBatch
 }
 
 void pbl_accel_report_sample(const struct pbl_accel *accel, const AccelDriverSample *sample) {
+  PBL_ASSERTN(accel->scale_num == accel->scale_den);
+
   const AccelRawBatch batch = {
     .data = (const uint8_t *)&sample->x,
     .num_samples = 1,
@@ -245,8 +248,6 @@ void pbl_accel_report_sample(const struct pbl_accel *accel, const AccelDriverSam
           [AXIS_Y] = {.offset = sizeof(int16_t), .sign = 1},
           [AXIS_Z] = {.offset = 2 * sizeof(int16_t), .sign = 1},
         },
-    .scale_num = 1,
-    .scale_den = 1,
     .first_timestamp_us = sample->timestamp_us,
   };
 

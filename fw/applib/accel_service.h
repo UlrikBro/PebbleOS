@@ -106,8 +106,7 @@ void accel_raw_data_service_subscribe(uint32_t samples_per_update, AccelRawDataH
 void accel_raw_counts_service_subscribe(uint32_t samples_per_update, AccelRawDataHandler handler);
 
 //! Get the scale of the samples from \ref accel_raw_counts_service_subscribe().
-//! @return The number of counts in 1 g, or 0 until the accelerometer has delivered its first
-//! samples. Call it from the data handler.
+//! @return The number of counts in 1 g. Fixed for the watch, so it can be read at any time.
 int32_t accel_service_get_counts_per_g(void);
 
 //! Unsubscribe from the accelerometer data event service. Once unsubscribed,

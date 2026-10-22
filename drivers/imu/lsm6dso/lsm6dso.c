@@ -64,9 +64,6 @@ static const struct pbl_lsm6dso *s_dev;
 // Consecutive stuck-high watchdog passes before a full stream recovery
 #define LSM6DSO_SHAKE_STUCK_PASSES_MAX 3U
 
-// Scale range for 16-bit two's complement samples
-#define LSM6DSO_S16_SCALE_RANGE PBL_BIT(15)
-
 // FIFO tag identifying an accelerometer (XL) sample
 #define LSM6DSO_FIFO_TAG_XL_NC 0x02U
 
@@ -242,7 +239,7 @@ static int16_t prv_axis_raw_mg(IMUCoordinateAxis axis, const uint8_t *raw) {
 
   val = s_dev->axis_dir[axis] * (int16_t)(((int32_t)prv_raw_to_s16(&raw[offset * 2U]) *
                                            (int32_t)CONFIG_ACCEL_LSM6DSO_SCALE_MG) /
-                                          (int32_t)LSM6DSO_S16_SCALE_RANGE);
+                                          (int32_t)LSM6DSO_SCALE_DEN);
 
   if (s_dev->state->rotated && (axis == AXIS_X || axis == AXIS_Y)) {
     val *= -1;
@@ -288,8 +285,6 @@ static void prv_lsm6dso_process_samples(uint16_t num_samples, uint64_t read_time
                .sign = (int8_t)(s_dev->axis_dir[AXIS_Y] * rotate)},
           [AXIS_Z] = {.offset = s_dev->axis_map[AXIS_Z] * 2U, .sign = s_dev->axis_dir[AXIS_Z]},
         },
-    .scale_num = CONFIG_ACCEL_LSM6DSO_SCALE_MG,
-    .scale_den = LSM6DSO_S16_SCALE_RANGE,
     .first_timestamp_us = read_time_us - (uint64_t)(num_samples - 1U) * interval_us,
     .sampling_interval_us = interval_us,
   };

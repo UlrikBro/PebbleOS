@@ -242,8 +242,6 @@ static uint64_t prv_get_curr_system_time_us(void) {
 // read_time_us is when the FIFO was read, which is when its newest sample was taken.
 static void prv_lis2dw12_process_samples(uint8_t num_samples, uint64_t read_time_us) {
   const uint32_t interval_us = s_dev->state->sampling_interval_us;
-  // Samples are 12-bit left-justified within a 16-bit little-endian word, so the
-  // raw word equals the 12-bit value << 4; scale the denominator by 16 to match.
   int8_t rotate = s_dev->state->rotated ? -1 : 1;
   AccelRawBatch batch = {
     .data = s_dev->state->raw_sample_buf,
@@ -259,8 +257,6 @@ static void prv_lis2dw12_process_samples(uint8_t num_samples, uint64_t read_time
                .sign = (int8_t)(s_dev->axis_dir[AXIS_Y] * rotate)},
           [AXIS_Z] = {.offset = s_dev->axis_map[AXIS_Z] * 2U, .sign = s_dev->axis_dir[AXIS_Z]},
         },
-    .scale_num = CONFIG_ACCEL_LIS2DW12_SCALE_MG,
-    .scale_den = LIS2DW12_S12_SCALE_RANGE << 4U,
     .first_timestamp_us = read_time_us - (uint64_t)(num_samples - 1U) * interval_us,
     .sampling_interval_us = interval_us,
   };

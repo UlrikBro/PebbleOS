@@ -307,9 +307,7 @@ void accel_raw_counts_service_subscribe(uint32_t samples_per_update, AccelRawDat
 // ----------------------------------------------------------------------------------------------
 int32_t accel_service_get_counts_per_g(void) {
   int32_t scale_num, scale_den;
-  if (!sys_accel_manager_get_scale(&scale_num, &scale_den)) {
-    return 0;
-  }
+  sys_accel_manager_get_scale(&scale_num, &scale_den);
   return 1000 * scale_den / scale_num;
 }
 

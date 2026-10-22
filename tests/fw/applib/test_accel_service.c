@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include <pbl/services/accel_manager.h>
+#include <pbl/util/size.h>
 
 #include <applib/accel_service.h>
 #include <applib/accel_service_private.h>
@@ -184,14 +185,12 @@ void sys_accel_manager_set_raw_counts(AccelManagerState *state, bool raw_counts)
   state->raw_counts_before_buffer = (state->generation == 0);
 }
 
-// 0/0 until the accelerometer has delivered samples
 static int32_t s_scale_num;
 static int32_t s_scale_den;
 
-bool sys_accel_manager_get_scale(int32_t *scale_num, int32_t *scale_den) {
+void sys_accel_manager_get_scale(int32_t *scale_num, int32_t *scale_den) {
   *scale_num = s_scale_num;
   *scale_den = s_scale_den;
-  return s_scale_den != 0;
 }
 
 // Posts a data event for the current subscription and returns its context
@@ -306,8 +305,8 @@ void test_accel_service__initialize(void) {
   s_timestamps[1] = 0;
   s_session = nullptr;
   s_read_after_change = 0;
-  s_scale_num = 0;
-  s_scale_den = 0;
+  s_scale_num = 16000;
+  s_scale_den = 32768;
   stub_pebble_tasks_set_current(PebbleTask_App);
 }
 
@@ -847,14 +846,19 @@ void test_accel_service__a_raw_data_subscription_gets_milli_g(void) {
   cl_assert(!s_current->raw_counts);
 }
 
-//! Counts per g come from the manager's scale, and are 0 until it knows it
+//! Counts per g come from the manager's scale, with no subscription or samples needed
 void test_accel_service__counts_per_g_follow_the_scale(void) {
-  cl_assert_equal_i(accel_service_get_counts_per_g(), 0);
+  const struct {
+    int32_t scale_mg;
+    int32_t counts_per_g;
+  } scales[] = {{2000, 16384}, {4000, 8192}, {8000, 4096}, {16000, 2048}};
+  for (size_t i = 0; i < ARRAY_LENGTH(scales); i++) {
+    s_scale_num = scales[i].scale_mg;
+    s_scale_den = 32768;
+    cl_assert_equal_i(accel_service_get_counts_per_g(), scales[i].counts_per_g);
+  }
 
-  s_scale_num = 16000;
-  s_scale_den = 32768;
-  cl_assert_equal_i(accel_service_get_counts_per_g(), 2048);
-
+  // Counts that are milli-g, as on QEMU
   s_scale_num = 1;
   s_scale_den = 1;
   cl_assert_equal_i(accel_service_get_counts_per_g(), 1000);
