@@ -55,6 +55,7 @@ typedef struct AccelManagerState {
   bool event_posted;        // True while a data event is queued or running
   uint32_t generation;      // bumped on every buffer change
   bool raw_counts;          // raw_buffer gets raw counts instead of milli-g
+  bool native_rate;         // gets every sample at the driver's rate, with no subsampling
 } AccelManagerState;
 
 typedef struct {
@@ -201,6 +202,12 @@ static void prv_setup_subsampling(uint32_t sampling_interval) {
   // Setup the subsampling numerator and denominators
   AccelManagerState *state = (AccelManagerState *)s_data_subscribers;
   while (state) {
+    if (state->native_rate) {
+      pbl_shared_cbuf_subsampled_client_set_ratio(&state->buffer_client, 1, 1);
+      state = (AccelManagerState *)state->list_node.next;
+      continue;
+    }
+
     uint32_t interval_gcd = gcd(sampling_interval, state->sampling_interval_us);
 
     // Protect against divide-by-zero if gcd returns 0 (when either input is 0)
@@ -652,6 +659,27 @@ PBL_SYSCALL(void, sys_accel_manager_set_raw_counts, (VAL, AccelManagerState *, s
   pbl_accel_lock(ACCEL);
   state->raw_counts = raw_counts;
   pbl_accel_unlock(ACCEL);
+}
+
+PBL_SYSCALL(void, sys_accel_manager_set_native_rate, (VAL, AccelManagerState *, state),
+            (VAL, bool, native_rate)) {
+  prv_assert_state_from_user(state, from_user);
+
+  pbl_accel_lock(ACCEL);
+  state->native_rate = native_rate;
+  prv_update_driver_config();
+  pbl_accel_unlock(ACCEL);
+}
+
+PBL_SYSCALL(uint32_t, sys_accel_manager_get_sampling_interval, (VAL, AccelManagerState *, state)) {
+  prv_assert_state_from_user(state, from_user);
+
+  pbl_accel_lock(ACCEL);
+  uint32_t interval_us =
+      state->native_rate ? pbl_accel_get_sampling_interval(ACCEL) : state->sampling_interval_us;
+  pbl_accel_unlock(ACCEL);
+
+  return interval_us;
 }
 
 PBL_SYSCALL(void, sys_accel_manager_get_scale, (OUT, int32_t *, scale_num),

@@ -524,6 +524,15 @@
                   "type": "function",
                   "name": "accel_service_get_counts_per_g",
                   "addedRevision": "110"
+                }, {
+                  "type": "function",
+                  "name": "accel_raw_counts_native_service_subscribe",
+                  "sortName": "accel_service_raw_counts_native_subscribe",
+                  "addedRevision": "110"
+                }, {
+                  "type": "function",
+                  "name": "accel_service_get_sampling_interval_us",
+                  "addedRevision": "110"
                 }
               ]
             }, {

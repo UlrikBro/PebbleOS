@@ -568,3 +568,72 @@ void test_accel_manager__single_samples_are_their_own_counts(void) {
   sys_accel_manager_get_scale(&scale_num, &scale_den);
   cl_assert_equal_i(scale_num, scale_den);
 }
+
+// Native rate
+//////////////////////////////////////////
+
+// Feeds a batch of samples at the driver's interval, with x the sample's index
+static void prv_feed_indexed_batch(int n) {
+  int16_t raw[32][3] = {};
+  cl_assert(n <= (int)ARRAY_LENGTH(raw));
+  for (int i = 0; i < n; i++) {
+    raw[i][0] = i;
+  }
+  AccelRawBatch batch = {
+    .data = (const uint8_t *)raw,
+    .num_samples = n,
+    .stride = sizeof(raw[0]),
+    .axis = {{.offset = 0, .sign = 1}, {.offset = 2, .sign = 1}, {.offset = 4, .sign = 1}},
+    .first_timestamp_us = s_now_us,
+    .sampling_interval_us = s_sampling_interval_us,
+  };
+  s_now_us += n * s_sampling_interval_us;
+  pbl_accel_lock(ACCEL);
+  pbl_accel_report_samples(ACCEL, &batch);
+  pbl_accel_unlock(ACCEL);
+}
+
+// A 25 Hz subscription for raw counts, on a driver that runs at 26 Hz
+static AccelManagerState *prv_subscribe_raw_counts_at_26hz(AccelRawData *buf, uint32_t n,
+                                                           bool native_rate) {
+  s_sampling_interval_us = 38461;
+  s_force_sampling_interval = true;
+  AccelManagerState *state = prv_subscribe_on_new_timers();
+  sys_accel_manager_set_raw_counts(state, true);
+  sys_accel_manager_set_native_rate(state, native_rate);
+  sys_accel_manager_set_sample_buffer(state, buf, n);
+  return state;
+}
+
+//! Raw counts at a rate the driver doesn't have are thinned by dropping samples, unchanged
+void test_accel_manager__raw_counts_are_subsampled_by_dropping_samples(void) {
+  AccelRawData counts[25];
+  AccelManagerState *state = prv_subscribe_raw_counts_at_26hz(counts, 25, false);
+
+  prv_feed_indexed_batch(26);
+
+  // One sample in 26 is dropped, so the spacing isn't even
+  cl_assert_equal_i(counts[0].x, 0);
+  for (int i = 1; i < 25; i++) {
+    cl_assert_equal_i(counts[i].x, i + 1);
+  }
+  cl_assert_equal_i(sys_accel_manager_get_sampling_interval(state), 40000);
+}
+
+//! A native rate subscription gets every sample, at the driver's interval
+void test_accel_manager__a_native_rate_subscriber_gets_every_sample(void) {
+  AccelRawData counts[26];
+  AccelManagerState *state = prv_subscribe_raw_counts_at_26hz(counts, 26, true);
+  AccelRawData thinned[25];
+  AccelManagerState *thinned_state = prv_subscribe_raw_counts_at_26hz(thinned, 25, false);
+
+  prv_feed_indexed_batch(26);
+
+  for (int i = 0; i < 26; i++) {
+    cl_assert_equal_i(counts[i].x, i);
+  }
+  cl_assert_equal_i(sys_accel_manager_get_sampling_interval(state), 38461);
+  // ... while the other subscription is still thinned
+  cl_assert_equal_i(thinned[1].x, 2);
+  cl_assert_equal_i(sys_accel_manager_get_sampling_interval(thinned_state), 40000);
+}

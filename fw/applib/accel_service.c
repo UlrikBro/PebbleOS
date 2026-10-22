@@ -241,7 +241,7 @@ static void prv_shared_subscribe(AccelServiceState *state, AccelSamplingRate sam
                                  uint32_t samples_per_update, AccelDataHandler data_handler,
                                  AccelRawDataHandler raw_data_handler,
                                  AccelRawDataHandler__deprecated raw_data_handler_deprecated,
-                                 bool raw_counts) {
+                                 bool raw_counts, bool native_rate) {
   prv_assert_handler_task(state);
   // No handler to deliver to, so treat it as a batch size of 0
   if (!data_handler && !raw_data_handler && !raw_data_handler_deprecated) {
@@ -264,6 +264,9 @@ static void prv_shared_subscribe(AccelServiceState *state, AccelSamplingRate sam
       sys_accel_manager_data_subscribe(sampling_rate, prv_do_data_handle, token, handler_task);
   if (raw_counts) {
     sys_accel_manager_set_raw_counts(manager_state, true);
+  }
+  if (native_rate) {
+    sys_accel_manager_set_native_rate(manager_state, true);
   }
   if (sys_accel_manager_set_sample_buffer(manager_state, raw_data, samples_per_update) != 0) {
     sys_accel_manager_data_unsubscribe(manager_state);
@@ -301,7 +304,24 @@ void accel_raw_data_service_subscribe(uint32_t samples_per_update, AccelRawDataH
 void accel_raw_counts_service_subscribe(uint32_t samples_per_update, AccelRawDataHandler handler) {
   AccelServiceState *session = accel_service_private_get_session(PebbleTask_Unknown);
   prv_shared_subscribe(session, ACCEL_SAMPLING_25HZ, samples_per_update, nullptr, handler, nullptr,
-                       true);
+                       true, false);
+}
+
+// ----------------------------------------------------------------------------------------------
+void accel_raw_counts_native_service_subscribe(uint32_t samples_per_update,
+                                               AccelRawDataHandler handler) {
+  AccelServiceState *session = accel_service_private_get_session(PebbleTask_Unknown);
+  prv_shared_subscribe(session, ACCEL_SAMPLING_25HZ, samples_per_update, nullptr, handler, nullptr,
+                       true, true);
+}
+
+// ----------------------------------------------------------------------------------------------
+uint32_t accel_service_get_sampling_interval_us(void) {
+  AccelServiceState *session = accel_service_private_get_session(PebbleTask_Unknown);
+  if (!session->manager_state) {
+    return 0;
+  }
+  return sys_accel_manager_get_sampling_interval(session->manager_state);
 }
 
 // ----------------------------------------------------------------------------------------------
@@ -316,7 +336,7 @@ void accel_data_service_subscribe__deprecated(uint32_t samples_per_update,
                                               AccelRawDataHandler__deprecated handler) {
   AccelServiceState *session = accel_service_private_get_session(PebbleTask_Unknown);
   prv_shared_subscribe(session, ACCEL_SAMPLING_25HZ, samples_per_update, nullptr, nullptr, handler,
-                       false);
+                       false, false);
 }
 
 // ----------------------------------------------------------------------------------------------
@@ -463,13 +483,14 @@ void accel_session_double_tap_unsubscribe(AccelServiceState *state) {
 void accel_session_data_subscribe(AccelServiceState *state, uint32_t samples_per_update,
                                   AccelDataHandler handler) {
   prv_shared_subscribe(state, ACCEL_SAMPLING_25HZ, samples_per_update, handler, nullptr, nullptr,
-                       false);
+                       false, false);
 }
 
 // -----------------------------------------------------------------------------------------------
 void accel_session_raw_data_subscribe(AccelServiceState *state, AccelSamplingRate sampling_rate,
                                       uint32_t samples_per_update, AccelRawDataHandler handler) {
-  prv_shared_subscribe(state, sampling_rate, samples_per_update, nullptr, handler, nullptr, false);
+  prv_shared_subscribe(state, sampling_rate, samples_per_update, nullptr, handler, nullptr, false,
+                       false);
 }
 
 // -----------------------------------------------------------------------------------------------

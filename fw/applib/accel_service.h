@@ -105,6 +105,19 @@ void accel_raw_data_service_subscribe(uint32_t samples_per_update, AccelRawDataH
 //! @param samples_per_update the number of samples to buffer, between 0 and 25.
 void accel_raw_counts_service_subscribe(uint32_t samples_per_update, AccelRawDataHandler handler);
 
+//! Subscribe to accelerometer samples in raw counts, at the accelerometer's own sampling rate.
+//! Like \ref accel_raw_counts_service_subscribe(), except that no sample is dropped to match
+//! the requested rate, so the samples are evenly spaced at
+//! \ref accel_service_get_sampling_interval_us().
+//! @param handler A callback to be executed on accelerometer data events
+//! @param samples_per_update the number of samples to buffer
+void accel_raw_counts_native_service_subscribe(uint32_t samples_per_update,
+                                               AccelRawDataHandler handler);
+
+//! Get the interval between the samples of the current data subscription.
+//! @return The interval in microseconds, or 0 when not subscribed.
+uint32_t accel_service_get_sampling_interval_us(void);
+
 //! Get the scale of the samples from \ref accel_raw_counts_service_subscribe().
 //! @return The number of counts in 1 g. Fixed for the watch, so it can be read at any time.
 int32_t accel_service_get_counts_per_g(void);
