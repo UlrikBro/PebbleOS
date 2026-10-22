@@ -149,7 +149,8 @@ void accel_raw_counts_native_service_subscribe(uint32_t samples_per_update,
 //! Get the interval between the samples of the current data subscription.
 //! For \ref accel_raw_counts_native_service_subscribe() it is the accelerometer's actual
 //! interval, which changes if another subscriber asks for a faster rate, so read it in each
-//! handler call. For other subscriptions it is the mean interval of the requested rate.
+//! handler call. A batch that straddles such a change has samples at both intervals, and is timed
+//! with the new one. For other subscriptions it is the mean interval of the requested rate.
 //! @return The interval in microseconds, or 0 when not subscribed.
 uint32_t accel_service_get_sampling_interval_us(void);
 
