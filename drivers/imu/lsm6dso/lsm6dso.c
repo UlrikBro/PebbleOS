@@ -263,7 +263,9 @@ static uint64_t prv_get_curr_system_time_us(void) {
 
 // Convert and dispatch the samples already sitting in raw_sample_buf. Kept free of
 // device I/O so it can run after the I2C reads instead of in between them.
-static void prv_lsm6dso_process_samples(uint16_t num_samples, uint64_t timestamp_us) {
+// read_time_us is when the FIFO was read, which is when its newest sample was taken.
+static void prv_lsm6dso_process_samples(uint16_t num_samples, uint64_t read_time_us) {
+  const uint32_t interval_us = s_dev->state->sampling_interval_us;
   // Each FIFO word is a tag byte followed by 6 data bytes; point the batch at the
   // first data byte and let the service step over the tags via the stride.
   int8_t rotate = s_dev->state->rotated ? -1 : 1;
@@ -283,8 +285,8 @@ static void prv_lsm6dso_process_samples(uint16_t num_samples, uint64_t timestamp
         },
     .scale_num = CONFIG_ACCEL_LSM6DSO_SCALE_MG,
     .scale_den = LSM6DSO_S16_SCALE_RANGE,
-    .first_timestamp_us = timestamp_us,
-    .sampling_interval_us = s_dev->state->sampling_interval_us,
+    .first_timestamp_us = read_time_us - (uint64_t)(num_samples - 1U) * interval_us,
+    .sampling_interval_us = interval_us,
   };
 
   pbl_accel_report_samples(&s_dev->accel, &batch);
@@ -612,8 +614,8 @@ static bool prv_configure_odr(uint32_t sampling_interval_us, bool shake_detectio
 
   val = PBL_FIELD_PREP(LSM6DSO_CTRL1_XL_ODR_MASK, odr) | prv_fs_bits();
 
-  PBL_LOG_DBG("Configuring ODR to %" PRIu32 " ms (%" PRIu32 " mHz)", sampling_interval_us / 1000UL,
-              sampling_interval_us > 0UL ? 1000000000UL / sampling_interval_us : 0UL);
+  PBL_LOG_DBG("Configuring ODR to %" PRIu32 " ms (%" PRIu32 " mHz)", sampling_interval_us / 1000U,
+              sampling_interval_us > 0U ? 1000000000U / sampling_interval_us : 0U);
 
   ret = prv_lsm6dso_write(LSM6DSO_CTRL1_XL, &val, 1);
   if (!ret) {

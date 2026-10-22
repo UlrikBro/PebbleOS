@@ -239,7 +239,9 @@ static uint64_t prv_get_curr_system_time_us(void) {
 
 // Convert and dispatch the samples already sitting in raw_sample_buf. Kept free of
 // device I/O so it can run after the I2C reads instead of in between them.
-static void prv_lis2dw12_process_samples(uint8_t num_samples, uint64_t timestamp_us) {
+// read_time_us is when the FIFO was read, which is when its newest sample was taken.
+static void prv_lis2dw12_process_samples(uint8_t num_samples, uint64_t read_time_us) {
+  const uint32_t interval_us = s_dev->state->sampling_interval_us;
   // Samples are 12-bit left-justified within a 16-bit little-endian word, so the
   // raw word equals the 12-bit value << 4; scale the denominator by 16 to match.
   int8_t rotate = s_dev->state->rotated ? -1 : 1;
@@ -259,8 +261,8 @@ static void prv_lis2dw12_process_samples(uint8_t num_samples, uint64_t timestamp
         },
     .scale_num = CONFIG_ACCEL_LIS2DW12_SCALE_MG,
     .scale_den = LIS2DW12_S12_SCALE_RANGE << 4U,
-    .first_timestamp_us = timestamp_us,
-    .sampling_interval_us = s_dev->state->sampling_interval_us,
+    .first_timestamp_us = read_time_us - (uint64_t)(num_samples - 1U) * interval_us,
+    .sampling_interval_us = interval_us,
   };
 
   pbl_accel_report_samples(&s_dev->accel, &batch);
@@ -268,8 +270,7 @@ static void prv_lis2dw12_process_samples(uint8_t num_samples, uint64_t timestamp
   // Keep the most recent sample around for peeks.
   uint8_t *last = &s_dev->state->raw_sample_buf[(num_samples - 1) * LIS2DW12_SAMPLE_SIZE_BYTES];
   prv_raw_to_mg(last, &s_dev->state->last_sample);
-  s_dev->state->last_sample.timestamp_us =
-      timestamp_us + (num_samples - 1) * s_dev->state->sampling_interval_us;
+  s_dev->state->last_sample.timestamp_us = read_time_us;
   s_dev->state->last_sample_valid = true;
 }
 

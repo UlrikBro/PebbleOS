@@ -14,6 +14,22 @@ pbl_clar_test(test_flash_erase
   OVERRIDES dummy_board
 )
 
+pbl_clar_test(test_accel_lsm6dso
+  SOURCES
+    drivers/imu/accel.c
+    drivers/imu/lsm6dso/lsm6dso.c
+    tests/fakes/fake_rtc.c
+  DEFINES
+    CONFIG_DRIVER_IMU_LOG_LEVEL=0
+    CONFIG_ACCEL_LSM6DSO_SCALE_MG=16000
+    CONFIG_ACCEL_LSM6DSO_WK_DUR_DEFAULT=1
+    CONFIG_ACCEL_LSM6DSO_WK_THS_MIN=1
+    CONFIG_ACCEL_LSM6DSO_WK_THS_MAX=40
+    CONFIG_ACCEL_LSM6DSO_WK_THS_DEFAULT=16
+    PBL_NO_LINKER_SCRIPT
+  OVERRIDES dummy_board
+)
+
 pbl_clar_test(test_accel_qemu
   SOURCES
     drivers/base/device.c
