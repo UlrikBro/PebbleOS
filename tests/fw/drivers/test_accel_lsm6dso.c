@@ -195,3 +195,21 @@ void test_accel_lsm6dso__the_power_mode_follows_the_build(void) {
   cl_assert_equal_i(s_regs[REG_CTRL5_C] & 0x80U, 0x80U);
 #endif
 }
+
+//! Samples the driver leaves in the FIFO are newer than the ones it reads, so those end earlier
+void test_accel_lsm6dso__a_batch_ends_before_the_samples_left_in_the_fifo(void) {
+  cl_assert_equal_i(pbl_accel_set_sampling_interval(ACCEL, 40000, nullptr), 0);
+  cl_assert_equal_i(pbl_accel_set_num_samples(ACCEL, LSM6DSO_FIFO_THRESHOLD), 0);
+
+  // Two samples more than one read takes
+  const uint16_t queued = LSM6DSO_FIFO_SIZE + 2;
+  s_regs[REG_FIFO_STATUS1] = queued & 0xFFU;
+  s_regs[REG_FIFO_STATUS2] = queued >> 8;
+  fake_rtc_increment_time_ms(500);
+  cl_assert_equal_i(pbl_accel_set_num_samples(ACCEL, 0), 0);
+
+  const uint64_t read_time_us = 1000500000ULL;
+  cl_assert_equal_i(s_batch.num_samples, LSM6DSO_FIFO_SIZE);
+  cl_assert(s_batch.first_timestamp_us + (LSM6DSO_FIFO_SIZE - 1) * 38461ULL ==
+            read_time_us - 2 * 38461ULL);
+}

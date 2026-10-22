@@ -266,9 +266,12 @@ static uint64_t prv_get_curr_system_time_us(void) {
 
 // Convert and dispatch the samples already sitting in raw_sample_buf. Kept free of
 // device I/O so it can run after the I2C reads instead of in between them.
-// read_time_us is when the FIFO was read, which is when its newest sample was taken.
-static void prv_lsm6dso_process_samples(uint16_t num_samples, uint64_t read_time_us) {
+// read_time_us is when the FIFO was read, which is when its newest sample was taken. The
+// samples read are the oldest ones, with num_unread newer ones left in the FIFO.
+static void prv_lsm6dso_process_samples(uint16_t num_samples, uint16_t num_unread,
+                                        uint64_t read_time_us) {
   const uint32_t interval_us = s_dev->state->sampling_interval_us;
+  const uint64_t last_time_us = read_time_us - (uint64_t)num_unread * interval_us;
   // Each FIFO word is a tag byte followed by 6 data bytes; point the batch at the
   // first data byte and let the service step over the tags via the stride.
   int8_t rotate = s_dev->state->rotated ? -1 : 1;
@@ -286,7 +289,7 @@ static void prv_lsm6dso_process_samples(uint16_t num_samples, uint64_t read_time
                .sign = (int8_t)(s_dev->axis_dir[AXIS_Y] * rotate)},
           [AXIS_Z] = {.offset = s_dev->axis_map[AXIS_Z] * 2U, .sign = s_dev->axis_dir[AXIS_Z]},
         },
-    .first_timestamp_us = read_time_us - (uint64_t)(num_samples - 1U) * interval_us,
+    .first_timestamp_us = last_time_us - (uint64_t)(num_samples - 1U) * interval_us,
     .sampling_interval_us = interval_us,
   };
 
@@ -362,6 +365,7 @@ static bool prv_lsm6dso_enable_fifo(uint16_t num_samples) {
 //! Salvage and dispatch any samples queued in the FIFO
 static void prv_lsm6dso_drain_fifo(void) {
   uint8_t status[2];
+  uint16_t queued;
   uint16_t samples;
 
   if (!prv_lsm6dso_read(LSM6DSO_FIFO_STATUS1, status, 2)) {
@@ -369,8 +373,8 @@ static void prv_lsm6dso_drain_fifo(void) {
     return;
   }
 
-  samples = (PBL_FIELD_GET(LSM6DSO_FIFO_STATUS2_DIFF_HI_MASK, status[1]) << 8U) | status[0];
-  samples = MIN(samples, LSM6DSO_FIFO_SIZE);
+  queued = (PBL_FIELD_GET(LSM6DSO_FIFO_STATUS2_DIFF_HI_MASK, status[1]) << 8U) | status[0];
+  samples = MIN(queued, LSM6DSO_FIFO_SIZE);
   if (samples == 0U) {
     return;
   }
@@ -380,7 +384,7 @@ static void prv_lsm6dso_drain_fifo(void) {
     return;
   }
 
-  prv_lsm6dso_process_samples(samples, prv_get_curr_system_time_us());
+  prv_lsm6dso_process_samples(samples, queued - samples, prv_get_curr_system_time_us());
   s_dev->state->last_fifo_read_tick = rtc_get_ticks();
 }
 
@@ -435,6 +439,7 @@ static bool prv_lsm6dso_service_int1(Lsm6dsoInt1Pass pass, bool *fifo_progress) 
   bool action_taken = false;
   bool fifo_overrun = false;
   bool shake = false;
+  uint16_t queued = 0U;
   uint16_t samples = 0U;
   uint64_t timestamp_us = 0U;
 
@@ -454,11 +459,9 @@ static bool prv_lsm6dso_service_int1(Lsm6dsoInt1Pass pass, bool *fifo_progress) 
     if ((fifo_status[1] & LSM6DSO_FIFO_STATUS2_FIFO_OVR_IA) != 0U) {
       fifo_overrun = true;
     } else if ((fifo_status[1] & LSM6DSO_FIFO_STATUS2_FIFO_WTM_IA) != 0U) {
-      samples =
+      queued =
           (PBL_FIELD_GET(LSM6DSO_FIFO_STATUS2_DIFF_HI_MASK, fifo_status[1]) << 8U) | fifo_status[0];
-      if (samples > LSM6DSO_FIFO_SIZE) {
-        samples = LSM6DSO_FIFO_SIZE;
-      }
+      samples = MIN(queued, LSM6DSO_FIFO_SIZE);
 
       if (samples > 0U) {
         if (!prv_lsm6dso_read_fifo(samples)) {
@@ -487,7 +490,7 @@ static bool prv_lsm6dso_service_int1(Lsm6dsoInt1Pass pass, bool *fifo_progress) 
     action_taken = true;
     *fifo_progress = true;
   } else if (samples > 0U) {
-    prv_lsm6dso_process_samples(samples, timestamp_us);
+    prv_lsm6dso_process_samples(samples, queued - samples, timestamp_us);
     action_taken = true;
     *fifo_progress = true;
   }
