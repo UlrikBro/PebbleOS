@@ -170,6 +170,11 @@ static const struct pbl_lsm6dso *s_dev;
 
 // WAKE_UP_DUR fields
 #define LSM6DSO_WAKE_UP_DUR_WAKE_DUR_MASK PBL_GENMASK(6, 5)
+#define LSM6DSO_WAKE_UP_DUR_WAKE_THS_W    PBL_BIT(4)
+
+// A WK_THS step is FS/2^6, or FS/2^8 with WAKE_THS_W. Above 4 g use the finer one, so a step is
+// 62.5 mg at both 4 g and 16 g and the thresholds don't depend on the full scale.
+#define LSM6DSO_WAKE_THS_W (CONFIG_ACCEL_LSM6DSO_SCALE_MG > 4000)
 
 // MD1_CFG fields
 #define LSM6DSO_MD1_CFG_INT1_WU PBL_BIT(5)
@@ -876,7 +881,8 @@ static int prv_init(const struct pbl_accel *accel) {
   }
 
   // Configure wake-up threshold defaults
-  val = PBL_FIELD_PREP(LSM6DSO_WAKE_UP_DUR_WAKE_DUR_MASK, CONFIG_ACCEL_LSM6DSO_WK_DUR_DEFAULT);
+  val = PBL_FIELD_PREP(LSM6DSO_WAKE_UP_DUR_WAKE_DUR_MASK, CONFIG_ACCEL_LSM6DSO_WK_DUR_DEFAULT) |
+        (LSM6DSO_WAKE_THS_W ? LSM6DSO_WAKE_UP_DUR_WAKE_THS_W : 0U);
   ret = prv_lsm6dso_write(LSM6DSO_WAKE_UP_DUR, &val, 1);
   if (!ret) {
     PBL_LOG_ERR("Could not write WAKE_UP_DUR register");

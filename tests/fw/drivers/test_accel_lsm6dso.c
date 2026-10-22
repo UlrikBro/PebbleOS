@@ -17,6 +17,8 @@
 #define REG_FIFO_STATUS2  0x3BU
 #define REG_CTRL1_XL      0x10U
 #define REG_CTRL3_C       0x12U
+#define REG_WAKE_UP_THS   0x5BU
+#define REG_WAKE_UP_DUR   0x5CU
 #define REG_FIFO_DATA_OUT 0x78U
 
 // Fake LSM6DSO: a register file, and a FIFO the driver reads in one burst
@@ -157,4 +159,29 @@ void test_accel_lsm6dso__a_batch_ends_at_the_fifo_read_time(void) {
   cl_assert_equal_i(s_batch.sampling_interval_us, 38461);
   cl_assert(s_batch.first_timestamp_us == read_time_us - 4 * 38461ULL);
   cl_assert(s_batch.first_timestamp_us + 4 * s_batch.sampling_interval_us == read_time_us);
+}
+
+//! At 16 g a wake-up threshold step is FS/2^8, 62.5 mg, as it is at 4 g
+void test_accel_lsm6dso__a_wake_up_threshold_step_is_62_5_mg_at_16g(void) {
+  cl_assert(s_regs[REG_WAKE_UP_DUR] & 0x10U);             // WAKE_THS_W
+  cl_assert_equal_i(s_regs[REG_WAKE_UP_THS] & 0x3FU, 16); // 1 g
+}
+
+//! Shake sensitivity maps onto the same thresholds as at 4 g
+void test_accel_lsm6dso__shake_sensitivity_maps_to_the_4g_thresholds(void) {
+  const struct {
+    uint8_t percent;
+    uint8_t wk_ths; // 62.5 mg steps
+  } map[] = {{10, 37}, {55, 19}, {100, 1}};
+  for (size_t i = 0; i < sizeof(map) / sizeof(map[0]); i++) {
+    cl_assert_equal_i(pbl_accel_set_shake_sensitivity_percent(ACCEL, map[i].percent), 0);
+    cl_assert_equal_i(s_regs[REG_WAKE_UP_THS] & 0x3FU, map[i].wk_ths);
+  }
+
+  // High sensitivity is the lowest threshold, and turning it off restores the user's
+  cl_assert_equal_i(pbl_accel_set_shake_sensitivity_percent(ACCEL, 55), 0);
+  cl_assert_equal_i(pbl_accel_set_shake_sensitivity_high(ACCEL, true), 0);
+  cl_assert_equal_i(s_regs[REG_WAKE_UP_THS] & 0x3FU, 1);
+  cl_assert_equal_i(pbl_accel_set_shake_sensitivity_high(ACCEL, false), 0);
+  cl_assert_equal_i(s_regs[REG_WAKE_UP_THS] & 0x3FU, 19);
 }
