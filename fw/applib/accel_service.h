@@ -140,6 +140,7 @@ void accel_raw_counts_service_subscribe(uint32_t samples_per_update, AccelRawDat
 //! timestamp + i * interval. \ref accel_service_set_sampling_rate() sets the slowest rate to
 //! sample at; the accelerometer runs at the next rate it supports, e.g. 26 Hz for 25 Hz on the
 //! LSM6DSO, and faster while another app or the system asks for a faster rate.
+//! Specific to this firmware, from SDK revision 111.
 //! @note Cannot use \ref accel_service_peek() when subscribed to accelerometer data events.
 //! @param handler A callback to be executed on accelerometer data events
 //! @param samples_per_update the number of samples to buffer, at most the accelerometer's limit.
@@ -151,6 +152,7 @@ void accel_raw_counts_native_service_subscribe(uint32_t samples_per_update,
 //! interval, which changes if another subscriber asks for a faster rate, so read it in each
 //! handler call. A batch that straddles such a change has samples at both intervals, and is timed
 //! with the new one. For other subscriptions it is the mean interval of the requested rate.
+//! Specific to this firmware, from SDK revision 111.
 //! @return The interval in microseconds, or 0 when not subscribed.
 uint32_t accel_service_get_sampling_interval_us(void);
 
