@@ -59,3 +59,19 @@ pbl_clar_test(test_accel_qemu
     PBL_NO_LINKER_SCRIPT
   OVERRIDES dummy_board
 )
+
+pbl_clar_test(test_accel_lis2dw12
+  SOURCES
+    drivers/imu/accel.c
+    drivers/imu/lis2dw12/lis2dw12.c
+    tests/fakes/fake_rtc.c
+  DEFINES
+    CONFIG_DRIVER_IMU_LOG_LEVEL=0
+    CONFIG_ACCEL_LIS2DW12_SCALE_MG=4000
+    CONFIG_ACCEL_LIS2DW12_WK_DUR_DEFAULT=1
+    CONFIG_ACCEL_LIS2DW12_WK_THS_MIN=1
+    CONFIG_ACCEL_LIS2DW12_WK_THS_MAX=28
+    CONFIG_ACCEL_LIS2DW12_WK_THS_DEFAULT=14
+    PBL_NO_LINKER_SCRIPT
+  OVERRIDES dummy_board
+)
