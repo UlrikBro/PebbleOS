@@ -514,8 +514,8 @@ static bool prv_configure_odr(uint32_t sampling_interval_us, bool shake_detectio
         PBL_FIELD_PREP(LIS2DW12_CTRL1_MODE_MASK, LIS2DW12_CTRL1_MODE_LP) |
         PBL_FIELD_PREP(LIS2DW12_CTRL1_ODR_MASK, odr);
 
-  PBL_LOG_DBG("Configuring ODR to %" PRIu32 " ms (%" PRIu32 " mHz)", sampling_interval_us / 1000UL,
-              sampling_interval_us > 0UL ? 1000000000UL / sampling_interval_us : 0UL);
+  PBL_LOG_DBG("Configuring ODR to %" PRIu32 " ms (%" PRIu32 " mHz)", sampling_interval_us / 1000,
+              sampling_interval_us > 0UL ? 1000000000 / sampling_interval_us : 0);
 
   ret = prv_lis2dw12_write(LIS2DW12_CTRL1, &val, 1);
   if (!ret) {
